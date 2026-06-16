@@ -1,0 +1,42 @@
+import { describe, expect, it } from "vitest";
+
+import { timesheetsToCsv } from "@/lib/csv";
+import type { AdminTimesheetRecord } from "@/lib/types";
+
+const record: AdminTimesheetRecord = {
+  id: "entry-1",
+  auth0UserId: "auth0|admin",
+  auth0Email: "gmahajan@labelbox.com",
+  workforceEmail: "kx9m12@alignerrworkforce.com",
+  liveCompareProblemId: "LC-CSV-001",
+  taskUrl: "https://taiga.example/tasks/LC-CSV-001",
+  startAt: "2026-06-16T16:00:00.000Z",
+  endAt: "2026-06-16T17:00:00.000Z",
+  summary: 'Reviewed "quoted" output',
+  comments: "Includes commas, quotes, and newlines\nfor export coverage.",
+  tokenUsage: 1234,
+  blockedOnTaigaBug: false,
+  turns: [
+    { turnNumber: 1, taskType: "Debugging" },
+    { turnNumber: 2, taskType: "Code review" },
+    { turnNumber: 3, taskType: "Testing" },
+    { turnNumber: 4, taskType: "Communication" },
+    { turnNumber: 5, taskType: "Root Cause Analysis" }
+  ],
+  createdAt: "2026-06-16T18:00:00.000Z",
+  updatedAt: "2026-06-16T18:30:00.000Z"
+};
+
+describe("timesheetsToCsv", () => {
+  it("exports one row with all timesheet fields and escaped values", () => {
+    const csv = timesheetsToCsv([record]);
+
+    expect(csv).toContain('"auth0_user_id"');
+    expect(csv).toContain('"auth0|admin"');
+    expect(csv).toContain('"gmahajan@labelbox.com"');
+    expect(csv).toContain('"kx9m12@alignerrworkforce.com"');
+    expect(csv).toContain('"Reviewed ""quoted"" output"');
+    expect(csv).toContain('"1: Debugging; 2: Code review; 3: Testing; 4: Communication; 5: Root Cause Analysis"');
+    expect(csv.split("\n")).toHaveLength(3);
+  });
+});

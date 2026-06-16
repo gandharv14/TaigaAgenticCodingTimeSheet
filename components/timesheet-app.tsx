@@ -10,8 +10,10 @@ import {
   Plus,
   RotateCcw,
   Save,
+  ShieldCheck,
   SquarePen
 } from "lucide-react";
+import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { TASK_TYPES } from "@/lib/task-types";
@@ -120,10 +122,12 @@ function formatDateRange(startAt: string, endAt: string) {
 
 export function TimesheetApp({
   debugMode,
+  isAdmin,
   loginEmail,
   userName
 }: {
   debugMode: boolean;
+  isAdmin: boolean;
   loginEmail: string;
   userName: string;
 }) {
@@ -275,19 +279,30 @@ export function TimesheetApp({
               <p className="text-sm text-stone-600">Signed in as {userName}</p>
             </div>
           </div>
-          {debugMode ? (
-            <span className="inline-flex h-10 w-fit items-center rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm font-medium text-amber-900">
-              Debug auth bypass
-            </span>
-          ) : (
-            <a
-              className="inline-flex h-10 w-fit items-center gap-2 rounded-lg border border-stone-300 bg-white px-3 text-sm font-medium text-stone-700 transition hover:border-stone-400 hover:bg-stone-50 focus:outline-none focus:ring-2 focus:ring-fern focus:ring-offset-2"
-              href="/auth/logout"
-            >
-              <LogOut aria-hidden="true" className="h-4 w-4" />
-              Log out
-            </a>
-          )}
+          <div className="flex flex-wrap gap-2">
+            {isAdmin ? (
+              <Link
+                className="inline-flex h-10 w-fit items-center gap-2 rounded-lg bg-ink px-3 text-sm font-medium text-white transition hover:bg-stone-800 focus:outline-none focus:ring-2 focus:ring-fern focus:ring-offset-2"
+                href="/admin"
+              >
+                <ShieldCheck aria-hidden="true" className="h-4 w-4" />
+                Admin portal
+              </Link>
+            ) : null}
+            {debugMode ? (
+              <span className="inline-flex h-10 w-fit items-center rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm font-medium text-amber-900">
+                Debug auth bypass
+              </span>
+            ) : (
+              <a
+                className="inline-flex h-10 w-fit items-center gap-2 rounded-lg border border-stone-300 bg-white px-3 text-sm font-medium text-stone-700 transition hover:border-stone-400 hover:bg-stone-50 focus:outline-none focus:ring-2 focus:ring-fern focus:ring-offset-2"
+                href="/auth/logout"
+              >
+                <LogOut aria-hidden="true" className="h-4 w-4" />
+                Log out
+              </a>
+            )}
+          </div>
         </div>
       </header>
 

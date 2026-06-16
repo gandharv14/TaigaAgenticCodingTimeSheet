@@ -2,10 +2,11 @@ import { isDebugAuthBypassEnabled } from "@/lib/auth0";
 import { userOwnsEntry } from "@/lib/authz";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import type { TaskType } from "@/lib/task-types";
-import type { TimesheetInput, TimesheetRecord } from "@/lib/types";
+import type { AdminTimesheetRecord, TimesheetInput, TimesheetRecord } from "@/lib/types";
 
 type EntryRow = {
   id: string;
+  auth0_user_id?: string;
   auth0_email: string | null;
   workforce_email: string;
   live_compare_problem_id: string;
@@ -36,6 +37,7 @@ type DebugRecord = TimesheetRecord & {
 };
 
 const debugRecords: DebugRecord[] = [];
+const ADMIN_PAGE_SIZE = 1000;
 
 function toPublicDebugRecord(record: DebugRecord): TimesheetRecord {
   return {
@@ -53,6 +55,13 @@ function toPublicDebugRecord(record: DebugRecord): TimesheetRecord {
     turns: record.turns,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt
+  };
+}
+
+function toPublicAdminDebugRecord(record: DebugRecord): AdminTimesheetRecord {
+  return {
+    ...toPublicDebugRecord(record),
+    auth0UserId: record.auth0UserId
   };
 }
 
@@ -77,6 +86,13 @@ function toRecord(row: EntryRow): TimesheetRecord {
       })),
     createdAt: row.created_at,
     updatedAt: row.updated_at
+  };
+}
+
+function toAdminRecord(row: EntryRow): AdminTimesheetRecord {
+  return {
+    ...toRecord(row),
+    auth0UserId: row.auth0_user_id ?? ""
   };
 }
 
@@ -119,6 +135,50 @@ export async function listTimesheetsForUser(auth0UserId: string) {
   }
 
   return (data as EntryRow[]).map(toRecord);
+}
+
+export async function listAllTimesheets() {
+  if (isDebugAuthBypassEnabled()) {
+    return [...debugRecords]
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+      .map(toPublicAdminDebugRecord);
+  }
+
+  const supabase = getSupabaseAdmin();
+  const rows: EntryRow[] = [];
+
+  for (let from = 0; ; from += ADMIN_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("timesheet_entries")
+      .select(
+        "id, auth0_user_id, auth0_email, workforce_email, live_compare_problem_id, task_url, start_at, end_at, summary, comments, token_usage, blocked_on_taiga_bug, created_at, updated_at, timesheet_turns(turn_number, task_type)"
+      )
+      .order("created_at", { ascending: false })
+      .range(from, from + ADMIN_PAGE_SIZE - 1);
+
+    if (error) {
+      throw error;
+    }
+
+    const page = (data as EntryRow[]) ?? [];
+    rows.push(...page);
+
+    if (page.length < ADMIN_PAGE_SIZE) {
+      break;
+    }
+  }
+
+  return rows.map(toAdminRecord);
+}
+
+export function clearDebugTimesheets() {
+  if (!isDebugAuthBypassEnabled()) {
+    return 0;
+  }
+
+  const count = debugRecords.length;
+  debugRecords.length = 0;
+  return count;
 }
 
 export async function getTimesheetForUser(id: string, auth0UserId: string) {

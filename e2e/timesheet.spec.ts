@@ -1,16 +1,56 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
-test("debug user can create and edit a timesheet", async ({ page }) => {
+type TestPayload = {
+  loginEmail: string;
+  name: string;
+  workforceEmail: string;
+  problemId: string;
+  taskUrl: string;
+  summary: string;
+  tokenUsage: string;
+};
+
+const firstUser: TestPayload = {
+  loginEmail: "playwright-user-one@labelbox.com",
+  name: "Playwright User One",
+  workforceEmail: "kx9m12@alignerrworkforce.com",
+  problemId: "LC-E2E-001",
+  taskUrl: "https://taiga.example/tasks/LC-E2E-001",
+  summary: "Implemented and validated the debug timesheet workflow.",
+  tokenUsage: "4321"
+};
+
+const secondUser: TestPayload = {
+  loginEmail: "playwright-user-two@labelbox.com",
+  name: "Playwright User Two",
+  workforceEmail: "ab12cd@alignerrworkforce.com",
+  problemId: "LC-E2E-002",
+  taskUrl: "https://taiga.example/tasks/LC-E2E-002",
+  summary: "Checked admin history visibility across two temporary users.",
+  tokenUsage: "2222"
+};
+
+async function setDebugUser(page: Page, email: string, name: string) {
+  await page.request.post("/api/debug/session", {
+    data: { email, name }
+  });
+}
+
+async function resetDebugData(page: Page) {
+  await page.request.post("/api/debug/reset");
+}
+
+async function createTimesheet(page: Page, payload: TestPayload) {
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "New timesheet" })).toBeVisible();
-  await expect(page.getByLabel("Alignerr login email")).toHaveValue("debug.alignerr@alignerr.com");
+  await expect(page.getByLabel("Alignerr login email")).toHaveValue(payload.loginEmail);
   await expect(page.getByLabel("Google Workforce email")).toHaveValue("");
   await expect(page.getByPlaceholder("Kx9m**@alignerrworkforce.com")).toBeVisible();
 
-  await page.getByLabel("Google Workforce email").fill("kx9m12@alignerrworkforce.com");
-  await page.getByLabel("Live Compare problem ID").fill("LC-E2E-001");
-  await page.getByLabel("Task URL").fill("https://taiga.example/tasks/LC-E2E-001");
+  await page.getByLabel("Google Workforce email").fill(payload.workforceEmail);
+  await page.getByLabel("Live Compare problem ID").fill(payload.problemId);
+  await page.getByLabel("Task URL").fill(payload.taskUrl);
   await page.getByLabel("Start time").fill("2026-06-16T09:00");
   await page.getByLabel("End time").fill("2026-06-16T10:15");
 
@@ -21,8 +61,8 @@ test("debug user can create and edit a timesheet", async ({ page }) => {
   await page.locator("select").nth(1).selectOption("Code writing");
   await page.locator("select").nth(5).selectOption("Testing");
 
-  await page.getByLabel("In 100 words or less describe your task").fill("Implemented and validated the debug timesheet workflow.");
-  await page.getByLabel("Token usage").fill("4321");
+  await page.getByLabel("In 100 words or less describe your task").fill(payload.summary);
+  await page.getByLabel("Token usage").fill(payload.tokenUsage);
   await page
     .getByLabel("Were you blocked on this task because of a Taiga error or bug?")
     .check();
@@ -32,20 +72,75 @@ test("debug user can create and edit a timesheet", async ({ page }) => {
 
   await expect(page.getByText("Timesheet submitted.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "My history" })).toBeVisible();
-  await expect(page.getByText("LC-E2E-001")).toBeVisible();
+  await expect(page.getByText(payload.problemId)).toBeVisible();
   await expect(page.getByText("6 turns")).toBeVisible();
-  await expect(page.getByText("4,321 tokens")).toBeVisible();
+  await expect(page.getByText(`${Number(payload.tokenUsage).toLocaleString()} tokens`)).toBeVisible();
   await expect(page.getByText("Taiga blocked")).toBeVisible();
   await expect(page.getByLabel("Google Workforce email")).toHaveValue("");
+}
 
-  await page.getByLabel("Edit LC-E2E-001").click();
+test("debug user can create and edit a timesheet", async ({ page }) => {
+  await resetDebugData(page);
+  await setDebugUser(page, firstUser.loginEmail, firstUser.name);
+
+  await createTimesheet(page, firstUser);
+  await expect(page.getByRole("link", { name: "Admin portal" })).toHaveCount(0);
+
+  await page.getByLabel(`Edit ${firstUser.problemId}`).click();
 
   await expect(page.getByRole("heading", { name: "Edit timesheet" })).toBeVisible();
-  await expect(page.getByLabel("Google Workforce email")).toHaveValue("kx9m12@alignerrworkforce.com");
+  await expect(page.getByLabel("Google Workforce email")).toHaveValue(firstUser.workforceEmail);
   await page.getByLabel("Token usage").fill("7777");
   await page.getByLabel("Any comments").fill("Updated during Playwright end-to-end coverage.");
   await page.getByRole("button", { name: "Update timesheet" }).click();
 
   await expect(page.getByText("Timesheet updated.")).toBeVisible();
   await expect(page.getByText("7,777 tokens")).toBeVisible();
+
+  await resetDebugData(page);
+});
+
+test("admin can view all timesheets and download CSV", async ({ page }) => {
+  await resetDebugData(page);
+
+  await setDebugUser(page, firstUser.loginEmail, firstUser.name);
+  await createTimesheet(page, firstUser);
+
+  await setDebugUser(page, secondUser.loginEmail, secondUser.name);
+  await createTimesheet(page, secondUser);
+  await expect(page.getByText(firstUser.problemId)).toHaveCount(0);
+
+  await page.goto("/admin");
+  await expect(page.getByRole("heading", { name: "Admin access required" })).toBeVisible();
+
+  await setDebugUser(page, "gmahajan@labelbox.com", "Gandharv Mahajan");
+  await page.goto("/");
+  await expect(page.getByRole("link", { name: "Admin portal" })).toBeVisible();
+  await page.getByRole("link", { name: "Admin portal" }).click();
+
+  await expect(page.getByRole("heading", { name: "Admin Portal" })).toBeVisible();
+  await expect(page.getByText("2 submissions across all users")).toBeVisible();
+  await expect(page.getByText(firstUser.problemId)).toBeVisible();
+  await expect(page.getByText(secondUser.problemId)).toBeVisible();
+  await expect(page.getByText(firstUser.loginEmail)).toBeVisible();
+  await expect(page.getByText(secondUser.loginEmail)).toBeVisible();
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("link", { name: "Download CSV" }).click();
+  const download = await downloadPromise;
+  const path = await download.path();
+  expect(path).toBeTruthy();
+
+  const { readFile } = await import("node:fs/promises");
+  const csv = await readFile(path as string, "utf8");
+  expect(csv).toContain(firstUser.problemId);
+  expect(csv).toContain(secondUser.problemId);
+  expect(csv).toContain(firstUser.workforceEmail);
+  expect(csv).toContain(secondUser.workforceEmail);
+  expect(csv).toContain("playwright-user-one@labelbox.com");
+
+  await resetDebugData(page);
+  await setDebugUser(page, "gmahajan@labelbox.com", "Gandharv Mahajan");
+  await page.goto("/admin");
+  await expect(page.getByText("0 submissions across all users")).toBeVisible();
 });

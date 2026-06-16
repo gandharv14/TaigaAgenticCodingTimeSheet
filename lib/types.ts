@@ -24,3 +24,7 @@ export type TimesheetRecord = TimesheetInput & {
   createdAt: string;
   updatedAt: string;
 };
+
+export type AdminTimesheetRecord = TimesheetRecord & {
+  auth0UserId: string;
+};
