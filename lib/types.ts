@@ -7,6 +7,8 @@ export type TimesheetTurnInput = {
 
 export type TimesheetInput = {
   workforceEmail: string;
+  primaryProgrammingLanguage: string;
+  secondaryProgrammingLanguages: string | null;
   liveCompareProblemId: string;
   taskUrl: string;
   startAt: string;
@@ -27,4 +29,17 @@ export type TimesheetRecord = TimesheetInput & {
 
 export type AdminTimesheetRecord = TimesheetRecord & {
   auth0UserId: string;
+};
+
+export type UserProfileInput = {
+  name: string;
+  workforceEmail: string | null;
+  discordId: string | null;
+  hubstaffEmail: string | null;
+};
+
+export type UserProfileRecord = UserProfileInput & {
+  auth0Email: string | null;
+  createdAt: string;
+  updatedAt: string;
 };

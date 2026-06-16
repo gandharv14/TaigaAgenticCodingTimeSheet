@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { isDebugAuthBypassEnabled } from "@/lib/auth0";
+import { clearDebugProfiles } from "@/lib/profiles";
 import { clearDebugTimesheets } from "@/lib/timesheets";
 
 export const runtime = "nodejs";
@@ -12,7 +13,8 @@ export async function POST() {
   }
 
   const deleted = clearDebugTimesheets();
-  const response = NextResponse.json({ ok: true, deleted });
+  const deletedProfiles = clearDebugProfiles();
+  const response = NextResponse.json({ ok: true, deleted, deletedProfiles });
   response.cookies.delete("debug_user_email");
   response.cookies.delete("debug_user_name");
   return response;

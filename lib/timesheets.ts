@@ -9,6 +9,8 @@ type EntryRow = {
   auth0_user_id?: string;
   auth0_email: string | null;
   workforce_email: string;
+  primary_programming_language?: string | null;
+  secondary_programming_languages?: string | null;
   live_compare_problem_id: string;
   task_url: string;
   start_at: string;
@@ -44,6 +46,8 @@ function toPublicDebugRecord(record: DebugRecord): TimesheetRecord {
     id: record.id,
     auth0Email: record.auth0Email,
     workforceEmail: record.workforceEmail,
+    primaryProgrammingLanguage: record.primaryProgrammingLanguage,
+    secondaryProgrammingLanguages: record.secondaryProgrammingLanguages,
     liveCompareProblemId: record.liveCompareProblemId,
     taskUrl: record.taskUrl,
     startAt: record.startAt,
@@ -70,6 +74,8 @@ function toRecord(row: EntryRow): TimesheetRecord {
     id: row.id,
     auth0Email: row.auth0_email,
     workforceEmail: row.workforce_email,
+    primaryProgrammingLanguage: row.primary_programming_language ?? "Not specified",
+    secondaryProgrammingLanguages: row.secondary_programming_languages ?? null,
     liveCompareProblemId: row.live_compare_problem_id,
     taskUrl: row.task_url,
     startAt: row.start_at,
@@ -101,6 +107,8 @@ function entryPayload(input: TimesheetInput, auth0UserId: string, auth0Email: st
     auth0_user_id: auth0UserId,
     auth0_email: auth0Email,
     workforce_email: input.workforceEmail,
+    primary_programming_language: input.primaryProgrammingLanguage,
+    secondary_programming_languages: input.secondaryProgrammingLanguages,
     live_compare_problem_id: input.liveCompareProblemId,
     task_url: input.taskUrl,
     start_at: new Date(input.startAt).toISOString(),
@@ -125,7 +133,7 @@ export async function listTimesheetsForUser(auth0UserId: string) {
   const { data, error } = await supabase
     .from("timesheet_entries")
     .select(
-      "id, auth0_email, workforce_email, live_compare_problem_id, task_url, start_at, end_at, summary, comments, token_usage, blocked_on_taiga_bug, created_at, updated_at, timesheet_turns(turn_number, task_type)"
+      "id, auth0_email, workforce_email, primary_programming_language, secondary_programming_languages, live_compare_problem_id, task_url, start_at, end_at, summary, comments, token_usage, blocked_on_taiga_bug, created_at, updated_at, timesheet_turns(turn_number, task_type)"
     )
     .eq("auth0_user_id", auth0UserId)
     .order("created_at", { ascending: false });
@@ -151,7 +159,7 @@ export async function listAllTimesheets() {
     const { data, error } = await supabase
       .from("timesheet_entries")
       .select(
-        "id, auth0_user_id, auth0_email, workforce_email, live_compare_problem_id, task_url, start_at, end_at, summary, comments, token_usage, blocked_on_taiga_bug, created_at, updated_at, timesheet_turns(turn_number, task_type)"
+        "id, auth0_user_id, auth0_email, workforce_email, primary_programming_language, secondary_programming_languages, live_compare_problem_id, task_url, start_at, end_at, summary, comments, token_usage, blocked_on_taiga_bug, created_at, updated_at, timesheet_turns(turn_number, task_type)"
       )
       .order("created_at", { ascending: false })
       .range(from, from + ADMIN_PAGE_SIZE - 1);
@@ -197,7 +205,7 @@ export async function getTimesheetForUser(id: string, auth0UserId: string) {
   const { data, error } = await supabase
     .from("timesheet_entries")
     .select(
-      "id, auth0_email, workforce_email, live_compare_problem_id, task_url, start_at, end_at, summary, comments, token_usage, blocked_on_taiga_bug, created_at, updated_at, timesheet_turns(turn_number, task_type)"
+      "id, auth0_email, workforce_email, primary_programming_language, secondary_programming_languages, live_compare_problem_id, task_url, start_at, end_at, summary, comments, token_usage, blocked_on_taiga_bug, created_at, updated_at, timesheet_turns(turn_number, task_type)"
     )
     .eq("id", id)
     .eq("auth0_user_id", auth0UserId)
@@ -218,6 +226,8 @@ export async function createTimesheet(input: TimesheetInput, auth0UserId: string
       auth0UserId,
       auth0Email,
       workforceEmail: input.workforceEmail,
+      primaryProgrammingLanguage: input.primaryProgrammingLanguage,
+      secondaryProgrammingLanguages: input.secondaryProgrammingLanguages,
       liveCompareProblemId: input.liveCompareProblemId,
       taskUrl: input.taskUrl,
       startAt: new Date(input.startAt).toISOString(),
@@ -281,6 +291,8 @@ export async function updateTimesheet(
       ...existing,
       auth0Email,
       workforceEmail: input.workforceEmail,
+      primaryProgrammingLanguage: input.primaryProgrammingLanguage,
+      secondaryProgrammingLanguages: input.secondaryProgrammingLanguages,
       liveCompareProblemId: input.liveCompareProblemId,
       taskUrl: input.taskUrl,
       startAt: new Date(input.startAt).toISOString(),

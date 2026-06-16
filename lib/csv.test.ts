@@ -8,6 +8,8 @@ const record: AdminTimesheetRecord = {
   auth0UserId: "auth0|admin",
   auth0Email: "gmahajan@labelbox.com",
   workforceEmail: "kx9m12@alignerrworkforce.com",
+  primaryProgrammingLanguage: "TypeScript",
+  secondaryProgrammingLanguages: "Python, SQL",
   liveCompareProblemId: "LC-CSV-001",
   taskUrl: "https://taiga.example/tasks/LC-CSV-001",
   startAt: "2026-06-16T16:00:00.000Z",
@@ -35,6 +37,10 @@ describe("timesheetsToCsv", () => {
     expect(csv).toContain('"auth0|admin"');
     expect(csv).toContain('"gmahajan@labelbox.com"');
     expect(csv).toContain('"kx9m12@alignerrworkforce.com"');
+    expect(csv).toContain('"primary_programming_language"');
+    expect(csv).toContain('"secondary_programming_languages"');
+    expect(csv).toContain('"TypeScript"');
+    expect(csv).toContain('"Python, SQL"');
     expect(csv).toContain('"Reviewed ""quoted"" output"');
     expect(csv).toContain('"1: Debugging; 2: Code review; 3: Testing; 4: Communication; 5: Root Cause Analysis"');
     expect(csv.split("\n")).toHaveLength(3);

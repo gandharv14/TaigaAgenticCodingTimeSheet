@@ -3,6 +3,8 @@ const baseUrl = process.env.E2E_BASE_URL ?? "http://127.0.0.1:3010";
 function payloadFor(suffix, workforceEmail, tokenUsage) {
   return {
     workforceEmail,
+    primaryProgrammingLanguage: suffix === "001" ? "TypeScript" : "Python",
+    secondaryProgrammingLanguages: suffix === "001" ? "SQL" : "JavaScript",
     liveCompareProblemId: `LC-SCRIPT-${suffix}`,
     taskUrl: `https://taiga.example/tasks/LC-SCRIPT-${suffix}`,
     startAt: "2026-06-16T09:00",
@@ -69,6 +71,19 @@ async function resetDebugData() {
 await resetDebugData();
 
 await setDebugUser("script-user-one@labelbox.com", "Script User One");
+const profile = await request("/api/profile");
+assert(profile.profile.name === "Script User One", "Expected default profile name from debug user.");
+const savedProfile = await request("/api/profile", {
+  method: "PUT",
+  body: JSON.stringify({
+    name: "Script User One Updated",
+    workforceEmail: "kx9m12@alignerrworkforce.com",
+    discordId: "script_user_one",
+    hubstaffEmail: "script-user-one@example.com"
+  })
+});
+assert(savedProfile.profile.name === "Script User One Updated", "Expected profile name update.");
+assert(savedProfile.profile.discordId === "script_user_one", "Expected Discord ID to round-trip.");
 const payload = payloadFor("001", "kx9m12@alignerrworkforce.com", 1234);
 const initial = await request("/api/timesheets");
 assert(Array.isArray(initial.entries), "Expected entries array from GET /api/timesheets.");
@@ -80,6 +95,8 @@ const created = await request("/api/timesheets", {
 });
 assert(created.entry?.id, "Expected created entry id.");
 assert(created.entry.workforceEmail === payload.workforceEmail, "Expected workforce email to round-trip.");
+assert(created.entry.primaryProgrammingLanguage === "TypeScript", "Expected primary language to round-trip.");
+assert(created.entry.secondaryProgrammingLanguages === "SQL", "Expected secondary language to round-trip.");
 assert(created.entry.auth0Email === "script-user-one@labelbox.com", "Expected temporary login email to be stored.");
 assert(created.entry.turns.length === 5, "Expected five created turns.");
 
@@ -144,6 +161,8 @@ const csv = await csvResponse.text();
 assert(csvResponse.ok, "Expected admin CSV export to succeed.");
 assert(csv.includes("LC-SCRIPT-001"), "Expected CSV to include first entry.");
 assert(csv.includes("LC-SCRIPT-002"), "Expected CSV to include second entry.");
+assert(csv.includes("primary_programming_language"), "Expected CSV to include primary language column.");
+assert(csv.includes("TypeScript"), "Expected CSV to include first primary language.");
 assert(csv.includes("script-user-two@labelbox.com"), "Expected CSV to include login email.");
 
 await resetDebugData();

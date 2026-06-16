@@ -4,6 +4,8 @@ type TestPayload = {
   loginEmail: string;
   name: string;
   workforceEmail: string;
+  primaryProgrammingLanguage: string;
+  secondaryProgrammingLanguages: string;
   problemId: string;
   taskUrl: string;
   summary: string;
@@ -14,6 +16,8 @@ const firstUser: TestPayload = {
   loginEmail: "playwright-user-one@labelbox.com",
   name: "Playwright User One",
   workforceEmail: "kx9m12@alignerrworkforce.com",
+  primaryProgrammingLanguage: "TypeScript",
+  secondaryProgrammingLanguages: "SQL",
   problemId: "LC-E2E-001",
   taskUrl: "https://taiga.example/tasks/LC-E2E-001",
   summary: "Implemented and validated the debug timesheet workflow.",
@@ -24,6 +28,8 @@ const secondUser: TestPayload = {
   loginEmail: "playwright-user-two@labelbox.com",
   name: "Playwright User Two",
   workforceEmail: "ab12cd@alignerrworkforce.com",
+  primaryProgrammingLanguage: "Python",
+  secondaryProgrammingLanguages: "JavaScript",
   problemId: "LC-E2E-002",
   taskUrl: "https://taiga.example/tasks/LC-E2E-002",
   summary: "Checked admin history visibility across two temporary users.",
@@ -45,11 +51,12 @@ async function createTimesheet(page: Page, payload: TestPayload) {
 
   await expect(page.getByRole("heading", { name: "New timesheet" })).toBeVisible();
   await expect(page.getByLabel("Alignerr login email")).toHaveValue(payload.loginEmail);
-  await expect(page.getByLabel("Google Workforce email")).toHaveValue("");
-  await expect(page.getByPlaceholder("Kx9m**@alignerrworkforce.com")).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Google Workforce email" })).toBeVisible();
 
   await page.getByLabel("Google Workforce email").fill(payload.workforceEmail);
   await page.getByLabel("Live Compare problem ID").fill(payload.problemId);
+  await page.getByLabel("Primary programming language").fill(payload.primaryProgrammingLanguage);
+  await page.getByLabel("Secondary programming languages").fill(payload.secondaryProgrammingLanguages);
   await page.getByLabel("Task URL").fill(payload.taskUrl);
   await page.getByLabel("Start time").fill("2026-06-16T09:00");
   await page.getByLabel("End time").fill("2026-06-16T10:15");
@@ -75,21 +82,34 @@ async function createTimesheet(page: Page, payload: TestPayload) {
   await expect(page.getByText(payload.problemId)).toBeVisible();
   await expect(page.getByText("6 turns")).toBeVisible();
   await expect(page.getByText(`${Number(payload.tokenUsage).toLocaleString()} tokens`)).toBeVisible();
+  await expect(page.getByText(payload.primaryProgrammingLanguage)).toBeVisible();
   await expect(page.getByText("Taiga blocked")).toBeVisible();
-  await expect(page.getByLabel("Google Workforce email")).toHaveValue("");
 }
 
 test("debug user can create and edit a timesheet", async ({ page }) => {
   await resetDebugData(page);
   await setDebugUser(page, firstUser.loginEmail, firstUser.name);
 
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "My Profile" })).toBeVisible();
+  await expect(page.getByLabel("Name")).toHaveValue(firstUser.name);
+  await page.getByLabel("Name").fill("Playwright User One Updated");
+  await page.getByRole("textbox", { name: "Workforce email", exact: true }).fill(firstUser.workforceEmail);
+  await page.getByLabel("Discord ID").fill("playwright_user_one");
+  await page.getByLabel("Hubstaff email").fill("playwright-user-one@example.com");
+  await page.getByRole("button", { name: "Save profile" }).click();
+  await expect(page.getByText("Profile saved.")).toBeVisible();
+  await expect(page.getByLabel("Google Workforce email")).toHaveValue(firstUser.workforceEmail);
+
   await createTimesheet(page, firstUser);
   await expect(page.getByRole("link", { name: "Admin portal" })).toHaveCount(0);
+  await expect(page.getByLabel("Google Workforce email")).toHaveValue(firstUser.workforceEmail);
 
   await page.getByLabel(`Edit ${firstUser.problemId}`).click();
 
   await expect(page.getByRole("heading", { name: "Edit timesheet" })).toBeVisible();
   await expect(page.getByLabel("Google Workforce email")).toHaveValue(firstUser.workforceEmail);
+  await expect(page.getByLabel("Primary programming language")).toHaveValue(firstUser.primaryProgrammingLanguage);
   await page.getByLabel("Token usage").fill("7777");
   await page.getByLabel("Any comments").fill("Updated during Playwright end-to-end coverage.");
   await page.getByRole("button", { name: "Update timesheet" }).click();
@@ -124,6 +144,8 @@ test("admin can view all timesheets and download CSV", async ({ page }) => {
   await expect(page.getByText(secondUser.problemId)).toBeVisible();
   await expect(page.getByText(firstUser.loginEmail)).toBeVisible();
   await expect(page.getByText(secondUser.loginEmail)).toBeVisible();
+  await expect(page.getByText(firstUser.primaryProgrammingLanguage)).toBeVisible();
+  await expect(page.getByText(secondUser.primaryProgrammingLanguage)).toBeVisible();
 
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("link", { name: "Download CSV" }).click();
@@ -137,6 +159,8 @@ test("admin can view all timesheets and download CSV", async ({ page }) => {
   expect(csv).toContain(secondUser.problemId);
   expect(csv).toContain(firstUser.workforceEmail);
   expect(csv).toContain(secondUser.workforceEmail);
+  expect(csv).toContain(firstUser.primaryProgrammingLanguage);
+  expect(csv).toContain(secondUser.secondaryProgrammingLanguages);
   expect(csv).toContain("playwright-user-one@labelbox.com");
 
   await resetDebugData(page);

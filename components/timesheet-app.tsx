@@ -11,18 +11,21 @@ import {
   RotateCcw,
   Save,
   ShieldCheck,
-  SquarePen
+  SquarePen,
+  UserRound
 } from "lucide-react";
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { TASK_TYPES } from "@/lib/task-types";
 import type { TaskType } from "@/lib/task-types";
-import type { TimesheetInput, TimesheetRecord } from "@/lib/types";
+import type { TimesheetInput, TimesheetRecord, UserProfileRecord } from "@/lib/types";
 import { countWords } from "@/lib/validation";
 
 type FormState = {
   workforceEmail: string;
+  primaryProgrammingLanguage: string;
+  secondaryProgrammingLanguages: string;
   liveCompareProblemId: string;
   taskUrl: string;
   startAt: string;
@@ -32,6 +35,13 @@ type FormState = {
   tokenUsage: string;
   blockedOnTaigaBug: boolean;
   turns: TaskType[];
+};
+
+type ProfileState = {
+  name: string;
+  workforceEmail: string;
+  discordId: string;
+  hubstaffEmail: string;
 };
 
 type Notice = {
@@ -46,6 +56,8 @@ const WORKFORCE_EMAIL_PLACEHOLDER = "Kx9m**@alignerrworkforce.com";
 function emptyForm(): FormState {
   return {
     workforceEmail: "",
+    primaryProgrammingLanguage: "",
+    secondaryProgrammingLanguages: "",
     liveCompareProblemId: "",
     taskUrl: "",
     startAt: "",
@@ -76,6 +88,9 @@ function dateTimeLocalValue(value: string) {
 function toPayload(form: FormState): TimesheetInput {
   return {
     workforceEmail: form.workforceEmail,
+    primaryProgrammingLanguage: form.primaryProgrammingLanguage,
+    secondaryProgrammingLanguages:
+      form.secondaryProgrammingLanguages.trim().length > 0 ? form.secondaryProgrammingLanguages : null,
     liveCompareProblemId: form.liveCompareProblemId,
     taskUrl: form.taskUrl,
     startAt: form.startAt,
@@ -94,6 +109,8 @@ function toPayload(form: FormState): TimesheetInput {
 function formFromRecord(record: TimesheetRecord): FormState {
   return {
     workforceEmail: record.workforceEmail,
+    primaryProgrammingLanguage: record.primaryProgrammingLanguage,
+    secondaryProgrammingLanguages: record.secondaryProgrammingLanguages ?? "",
     liveCompareProblemId: record.liveCompareProblemId,
     taskUrl: record.taskUrl,
     startAt: dateTimeLocalValue(record.startAt),
@@ -103,6 +120,24 @@ function formFromRecord(record: TimesheetRecord): FormState {
     tokenUsage: record.tokenUsage === null ? "" : String(record.tokenUsage),
     blockedOnTaigaBug: record.blockedOnTaigaBug,
     turns: record.turns.map((turn) => turn.taskType)
+  };
+}
+
+function emptyProfile(userName: string): ProfileState {
+  return {
+    name: userName,
+    workforceEmail: "",
+    discordId: "",
+    hubstaffEmail: ""
+  };
+}
+
+function profileFromRecord(profile: UserProfileRecord): ProfileState {
+  return {
+    name: profile.name,
+    workforceEmail: profile.workforceEmail ?? "",
+    discordId: profile.discordId ?? "",
+    hubstaffEmail: profile.hubstaffEmail ?? ""
   };
 }
 
@@ -133,10 +168,14 @@ export function TimesheetApp({
 }) {
   const [form, setForm] = useState<FormState>(() => emptyForm());
   const [entries, setEntries] = useState<TimesheetRecord[]>([]);
+  const [profile, setProfile] = useState<ProfileState>(() => emptyProfile(userName));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [loadingProfile, setLoadingProfile] = useState(true);
+  const [savingProfile, setSavingProfile] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [profileNotice, setProfileNotice] = useState<Notice | null>(null);
 
   const summaryWords = useMemo(() => countWords(form.summary), [form.summary]);
   const overSummaryLimit = summaryWords > 100;
@@ -178,8 +217,57 @@ export function TimesheetApp({
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadProfile() {
+      setLoadingProfile(true);
+      try {
+        const response = await fetch("/api/profile", { cache: "no-store" });
+        const data = (await response.json()) as { profile?: UserProfileRecord; error?: string };
+
+        if (!response.ok || !data.profile) {
+          throw new Error(data.error ?? "Unable to load profile.");
+        }
+
+        if (!cancelled) {
+          const nextProfile = profileFromRecord(data.profile);
+          setProfile(nextProfile);
+          setForm((current) => ({
+            ...current,
+            workforceEmail: current.workforceEmail || nextProfile.workforceEmail
+          }));
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setProfileNotice({
+            tone: "error",
+            message: error instanceof Error ? error.message : "Unable to load profile."
+          });
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingProfile(false);
+        }
+      }
+    }
+
+    loadProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((current) => ({
+      ...current,
+      [key]: value
+    }));
+  }
+
+  function updateProfileField<K extends keyof ProfileState>(key: K, value: ProfileState[K]) {
+    setProfile((current) => ({
       ...current,
       [key]: value
     }));
@@ -213,8 +301,55 @@ export function TimesheetApp({
 
   function resetForm() {
     setEditingId(null);
-    setForm(emptyForm());
+    setForm({
+      ...emptyForm(),
+      workforceEmail: profile.workforceEmail
+    });
     setNotice(null);
+  }
+
+  async function submitProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSavingProfile(true);
+    setProfileNotice(null);
+
+    try {
+      const response = await fetch("/api/profile", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          name: profile.name,
+          workforceEmail: profile.workforceEmail.trim().length > 0 ? profile.workforceEmail : null,
+          discordId: profile.discordId.trim().length > 0 ? profile.discordId : null,
+          hubstaffEmail: profile.hubstaffEmail.trim().length > 0 ? profile.hubstaffEmail : null
+        })
+      });
+      const data = (await response.json()) as { profile?: UserProfileRecord; error?: string; issues?: string[] };
+
+      if (!response.ok || !data.profile) {
+        throw new Error(data.issues?.join(" ") || data.error || "Unable to save profile.");
+      }
+
+      const nextProfile = profileFromRecord(data.profile);
+      setProfile(nextProfile);
+      setForm((current) => ({
+        ...current,
+        workforceEmail: current.workforceEmail || nextProfile.workforceEmail
+      }));
+      setProfileNotice({
+        tone: "success",
+        message: "Profile saved."
+      });
+    } catch (error) {
+      setProfileNotice({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Unable to save profile."
+      });
+    } finally {
+      setSavingProfile(false);
+    }
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -245,7 +380,10 @@ export function TimesheetApp({
         message: editingId ? "Timesheet updated." : "Timesheet submitted."
       });
       setEditingId(null);
-      setForm(emptyForm());
+      setForm({
+        ...emptyForm(),
+        workforceEmail: profile.workforceEmail
+      });
     } catch (error) {
       setNotice({
         tone: "error",
@@ -379,7 +517,30 @@ export function TimesheetApp({
                   value={form.liveCompareProblemId}
                 />
               </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-stone-700">Primary programming language</span>
+                <input
+                  className="mt-1 h-11 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
+                  onChange={(event) => updateField("primaryProgrammingLanguage", event.target.value)}
+                  placeholder="TypeScript"
+                  required
+                  type="text"
+                  value={form.primaryProgrammingLanguage}
+                />
+              </label>
             </div>
+
+            <label className="block">
+              <span className="text-sm font-medium text-stone-700">Secondary programming languages</span>
+              <input
+                className="mt-1 h-11 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
+                onChange={(event) => updateField("secondaryProgrammingLanguages", event.target.value)}
+                placeholder="Python, SQL"
+                type="text"
+                value={form.secondaryProgrammingLanguages}
+              />
+            </label>
 
             <label className="block">
               <span className="text-sm font-medium text-stone-700">Task URL</span>
@@ -544,12 +705,89 @@ export function TimesheetApp({
           </form>
         </section>
 
-        <aside className="h-fit rounded-lg border border-stone-200 bg-white shadow-panel">
-          <div className="flex items-center gap-2 border-b border-stone-200 px-5 py-4">
-            <History aria-hidden="true" className="h-4 w-4 text-saffron" />
-            <h2 className="text-lg font-semibold text-ink">My history</h2>
-          </div>
-          <div className="max-h-[calc(100vh-11rem)] space-y-3 overflow-auto px-4 py-4">
+        <aside className="space-y-6">
+          <section className="rounded-lg border border-stone-200 bg-white shadow-panel">
+            <div className="flex items-center gap-2 border-b border-stone-200 px-5 py-4">
+              <UserRound aria-hidden="true" className="h-4 w-4 text-fern" />
+              <h2 className="text-lg font-semibold text-ink">My Profile</h2>
+            </div>
+            <form className="space-y-4 px-4 py-4" onSubmit={submitProfile}>
+              {profileNotice ? (
+                <div
+                  className={`rounded-lg border px-3 py-2 text-sm ${
+                    profileNotice.tone === "success"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                      : "border-red-200 bg-red-50 text-red-900"
+                  }`}
+                  role="status"
+                >
+                  {profileNotice.message}
+                </div>
+              ) : null}
+
+              <label className="block">
+                <span className="text-sm font-medium text-stone-700">Name</span>
+                <input
+                  className="mt-1 h-10 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
+                  disabled={loadingProfile}
+                  onChange={(event) => updateProfileField("name", event.target.value)}
+                  required
+                  type="text"
+                  value={profile.name}
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-stone-700">Workforce email</span>
+                <input
+                  className="mt-1 h-10 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
+                  disabled={loadingProfile}
+                  onChange={(event) => updateProfileField("workforceEmail", event.target.value)}
+                  placeholder={WORKFORCE_EMAIL_PLACEHOLDER}
+                  type="email"
+                  value={profile.workforceEmail}
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-stone-700">Discord ID</span>
+                <input
+                  className="mt-1 h-10 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
+                  disabled={loadingProfile}
+                  onChange={(event) => updateProfileField("discordId", event.target.value)}
+                  type="text"
+                  value={profile.discordId}
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-stone-700">Hubstaff email</span>
+                <input
+                  className="mt-1 h-10 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
+                  disabled={loadingProfile}
+                  onChange={(event) => updateProfileField("hubstaffEmail", event.target.value)}
+                  type="email"
+                  value={profile.hubstaffEmail}
+                />
+              </label>
+
+              <button
+                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-ink px-3 text-sm font-medium text-white transition hover:bg-stone-800 focus:outline-none focus:ring-2 focus:ring-fern focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-stone-400"
+                disabled={savingProfile || loadingProfile}
+                type="submit"
+              >
+                {savingProfile ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" /> : <Save aria-hidden="true" className="h-4 w-4" />}
+                Save profile
+              </button>
+            </form>
+          </section>
+
+          <section className="h-fit rounded-lg border border-stone-200 bg-white shadow-panel">
+            <div className="flex items-center gap-2 border-b border-stone-200 px-5 py-4">
+              <History aria-hidden="true" className="h-4 w-4 text-saffron" />
+              <h2 className="text-lg font-semibold text-ink">My history</h2>
+            </div>
+            <div className="max-h-[calc(100vh-25rem)] space-y-3 overflow-auto px-4 py-4">
             {loadingHistory ? (
               <div className="flex items-center gap-2 rounded-lg border border-stone-200 bg-stone-50 p-4 text-sm text-stone-600">
                 <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
@@ -587,6 +825,12 @@ export function TimesheetApp({
                 </div>
                 <p className="mt-3 line-clamp-3 text-sm leading-6 text-stone-700">{entry.summary}</p>
                 <div className="mt-3 flex flex-wrap gap-2 text-xs text-stone-600">
+                  <span className="rounded-lg bg-emerald-50 px-2 py-1 text-emerald-900">
+                    {entry.primaryProgrammingLanguage}
+                  </span>
+                  {entry.secondaryProgrammingLanguages ? (
+                    <span className="rounded-lg bg-stone-100 px-2 py-1">{entry.secondaryProgrammingLanguages}</span>
+                  ) : null}
                   <span className="rounded-lg bg-stone-100 px-2 py-1">{entry.turns.length} turns</span>
                   {entry.tokenUsage !== null ? (
                     <span className="rounded-lg bg-stone-100 px-2 py-1">{entry.tokenUsage.toLocaleString()} tokens</span>
@@ -595,7 +839,8 @@ export function TimesheetApp({
                 </div>
               </article>
             ))}
-          </div>
+            </div>
+          </section>
         </aside>
       </div>
     </main>

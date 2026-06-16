@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { validateTimesheetInput } from "@/lib/validation";
+import { validateTimesheetInput, validateUserProfileInput } from "@/lib/validation";
 
 const validPayload = {
   workforceEmail: "kx9m12@alignerrworkforce.com",
+  primaryProgrammingLanguage: "TypeScript",
+  secondaryProgrammingLanguages: "Python, SQL",
   liveCompareProblemId: "LC-123",
   taskUrl: "https://example.com/tasks/LC-123",
   startAt: "2026-06-15T09:00",
@@ -71,6 +73,15 @@ describe("timesheet validation", () => {
     expect(result.success).toBe(false);
   });
 
+  it("requires a primary programming language", () => {
+    const result = validateTimesheetInput({
+      ...validPayload,
+      primaryProgrammingLanguage: ""
+    });
+
+    expect(result.success).toBe(false);
+  });
+
   it("rejects non-sequential turn numbers", () => {
     const result = validateTimesheetInput({
       ...validPayload,
@@ -81,5 +92,40 @@ describe("timesheet validation", () => {
     });
 
     expect(result.success).toBe(false);
+  });
+});
+
+describe("profile validation", () => {
+  it("accepts valid editable profile info", () => {
+    expect(
+      validateUserProfileInput({
+        name: "Test User",
+        workforceEmail: "kx9m12@alignerrworkforce.com",
+        discordId: "test_user",
+        hubstaffEmail: "test.user@example.com"
+      }).success
+    ).toBe(true);
+  });
+
+  it("allows empty optional profile fields", () => {
+    expect(
+      validateUserProfileInput({
+        name: "Test User",
+        workforceEmail: null,
+        discordId: null,
+        hubstaffEmail: null
+      }).success
+    ).toBe(true);
+  });
+
+  it("rejects invalid profile emails", () => {
+    expect(
+      validateUserProfileInput({
+        name: "Test User",
+        workforceEmail: "test@example.com",
+        discordId: null,
+        hubstaffEmail: "not-an-email"
+      }).success
+    ).toBe(false);
   });
 });

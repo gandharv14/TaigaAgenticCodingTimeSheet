@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { TASK_TYPES } from "@/lib/task-types";
-import type { TimesheetInput } from "@/lib/types";
+import type { TimesheetInput, UserProfileInput } from "@/lib/types";
 
 const MAX_SUMMARY_WORDS = 100;
 const MIN_TURNS = 5;
@@ -27,6 +27,11 @@ const nullableTrimmedString = z.preprocess(
   z.string().nullable()
 );
 
+const optionalWorkforceEmail = nullableTrimmedString.refine(
+  (value) => value === null || value.toLowerCase().endsWith("@alignerrworkforce.com"),
+  "Google Workforce email must use @alignerrworkforce.com."
+);
+
 export const timesheetInputSchema = z
   .object({
     workforceEmail: z
@@ -37,6 +42,15 @@ export const timesheetInputSchema = z
         (value) => value.toLowerCase().endsWith("@alignerrworkforce.com"),
         "Google Workforce email must use @alignerrworkforce.com."
       ),
+    primaryProgrammingLanguage: z
+      .string()
+      .trim()
+      .min(1, "Primary programming language is required.")
+      .max(80, "Primary programming language must be 80 characters or less."),
+    secondaryProgrammingLanguages: nullableTrimmedString.refine(
+      (value) => value === null || value.length <= 240,
+      "Secondary programming languages must be 240 characters or less."
+    ),
     liveCompareProblemId: z.string().trim().min(1, "Live Compare problem ID is required."),
     taskUrl: z.string().trim().url("Enter a valid task URL."),
     startAt: z.string().trim().refine(isValidDateTime, "Enter a valid start date and time."),
@@ -87,6 +101,25 @@ export const timesheetInputSchema = z
 export function validateTimesheetInput(input: unknown) {
   return timesheetInputSchema.safeParse(input) as
     | { success: true; data: TimesheetInput }
+    | { success: false; error: z.ZodError };
+}
+
+export const userProfileInputSchema = z.object({
+  name: z.string().trim().min(1, "Name is required.").max(120, "Name must be 120 characters or less."),
+  workforceEmail: optionalWorkforceEmail,
+  discordId: nullableTrimmedString.refine(
+    (value) => value === null || value.length <= 120,
+    "Discord ID must be 120 characters or less."
+  ),
+  hubstaffEmail: nullableTrimmedString.refine(
+    (value) => value === null || z.string().email().safeParse(value).success,
+    "Enter a valid Hubstaff email."
+  )
+});
+
+export function validateUserProfileInput(input: unknown) {
+  return userProfileInputSchema.safeParse(input) as
+    | { success: true; data: UserProfileInput }
     | { success: false; error: z.ZodError };
 }
 

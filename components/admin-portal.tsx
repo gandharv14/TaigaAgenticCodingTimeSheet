@@ -122,6 +122,7 @@ export function AdminPortal({ adminEmail }: { adminEmail: string }) {
                     <th className="px-4 py-3">Problem</th>
                     <th className="px-4 py-3">Login email</th>
                     <th className="px-4 py-3">Workforce email</th>
+                    <th className="px-4 py-3">Languages</th>
                     <th className="px-4 py-3">Time</th>
                     <th className="px-4 py-3">Turns</th>
                     <th className="px-4 py-3">Tokens</th>
@@ -139,6 +140,12 @@ export function AdminPortal({ adminEmail }: { adminEmail: string }) {
                       </td>
                       <td className="px-4 py-3 text-stone-700">{entry.auth0Email ?? "Unknown"}</td>
                       <td className="px-4 py-3 text-stone-700">{entry.workforceEmail}</td>
+                      <td className="min-w-48 px-4 py-3 text-stone-700">
+                        {entry.primaryProgrammingLanguage}
+                        {entry.secondaryProgrammingLanguages ? (
+                          <span className="block text-xs text-stone-500">{entry.secondaryProgrammingLanguages}</span>
+                        ) : null}
+                      </td>
                       <td className="min-w-56 px-4 py-3 text-stone-700">
                         {formatDate(entry.startAt)}
                         <br />
