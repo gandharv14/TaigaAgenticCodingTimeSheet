@@ -1,0 +1,6 @@
+.env
+.env*.local
+.git
+.next
+node_modules
+output
