@@ -5,14 +5,20 @@ export type TimesheetTurnInput = {
   taskType: TaskType;
 };
 
+export type TimesheetWorkSessionInput = {
+  sessionNumber: number;
+  startAt: string;
+  endAt: string;
+};
+
 export type TimesheetInput = {
   workforceEmail: string;
   primaryProgrammingLanguage: string;
   secondaryProgrammingLanguages: string | null;
   liveCompareProblemId: string;
   taskUrl: string;
-  startAt: string;
-  endAt: string;
+  workSessions: TimesheetWorkSessionInput[];
+  totalHoursOverride: number | null;
   summary: string;
   comments: string | null;
   tokenUsage: number | null;
@@ -23,6 +29,10 @@ export type TimesheetInput = {
 export type TimesheetRecord = TimesheetInput & {
   id: string;
   auth0Email: string | null;
+  startAt: string;
+  endAt: string;
+  calculatedHours: number;
+  reportedHours: number;
   createdAt: string;
   updatedAt: string;
 };

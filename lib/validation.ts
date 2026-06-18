@@ -53,8 +53,16 @@ export const timesheetInputSchema = z
     ),
     liveCompareProblemId: z.string().trim().min(1, "Live Compare problem ID is required."),
     taskUrl: z.string().trim().url("Enter a valid task URL."),
-    startAt: z.string().trim().refine(isValidDateTime, "Enter a valid start date and time."),
-    endAt: z.string().trim().refine(isValidDateTime, "Enter a valid end date and time."),
+    workSessions: z
+      .array(
+        z.object({
+          sessionNumber: z.number().int().positive(),
+          startAt: z.string().trim().refine(isValidDateTime, "Enter a valid session start date and time."),
+          endAt: z.string().trim().refine(isValidDateTime, "Enter a valid session end date and time.")
+        })
+      )
+      .min(1, "At least one work session is required."),
+    totalHoursOverride: z.number().finite().nonnegative().nullable(),
     summary: z
       .string()
       .trim()
@@ -76,16 +84,47 @@ export const timesheetInputSchema = z
       .min(MIN_TURNS, "At least 5 turns are required.")
   })
   .superRefine((value, context) => {
-    const start = new Date(value.startAt);
-    const end = new Date(value.endAt);
+    const sessionRanges = value.workSessions
+      .map((session, index) => ({
+        index,
+        start: new Date(session.startAt),
+        end: new Date(session.endAt)
+      }))
+      .filter(({ start, end }) => Number.isFinite(start.getTime()) && Number.isFinite(end.getTime()));
 
-    if (Number.isFinite(start.getTime()) && Number.isFinite(end.getTime()) && end <= start) {
-      context.addIssue({
-        code: "custom",
-        path: ["endAt"],
-        message: "End time must be after start time."
+    sessionRanges.forEach(({ index, start, end }) => {
+      if (end <= start) {
+        context.addIssue({
+          code: "custom",
+          path: ["workSessions", index, "endAt"],
+          message: "Session end time must be after start time."
+        });
+      }
+    });
+
+    [...sessionRanges]
+      .sort((a, b) => a.start.getTime() - b.start.getTime())
+      .forEach((range, sortedIndex, sortedRanges) => {
+        const previous = sortedRanges[sortedIndex - 1];
+
+        if (previous && range.start < previous.end) {
+          context.addIssue({
+            code: "custom",
+            path: ["workSessions", range.index, "startAt"],
+            message: "Work sessions cannot overlap."
+          });
+        }
       });
-    }
+
+    value.workSessions.forEach((session, index) => {
+      if (session.sessionNumber !== index + 1) {
+        context.addIssue({
+          code: "custom",
+          path: ["workSessions", index, "sessionNumber"],
+          message: "Session numbers must be sequential."
+        });
+      }
+    });
 
     value.turns.forEach((turn, index) => {
       if (turn.turnNumber !== index + 1) {

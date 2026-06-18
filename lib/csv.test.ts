@@ -13,7 +13,22 @@ const record: AdminTimesheetRecord = {
   liveCompareProblemId: "LC-CSV-001",
   taskUrl: "https://taiga.example/tasks/LC-CSV-001",
   startAt: "2026-06-16T16:00:00.000Z",
-  endAt: "2026-06-16T17:00:00.000Z",
+  endAt: "2026-06-16T19:30:00.000Z",
+  workSessions: [
+    {
+      sessionNumber: 1,
+      startAt: "2026-06-16T16:00:00.000Z",
+      endAt: "2026-06-16T17:00:00.000Z"
+    },
+    {
+      sessionNumber: 2,
+      startAt: "2026-06-16T19:00:00.000Z",
+      endAt: "2026-06-16T19:30:00.000Z"
+    }
+  ],
+  calculatedHours: 1.5,
+  totalHoursOverride: 1.75,
+  reportedHours: 1.75,
   summary: 'Reviewed "quoted" output',
   comments: "Includes commas, quotes, and newlines\nfor export coverage.",
   tokenUsage: 1234,
@@ -39,8 +54,15 @@ describe("timesheetsToCsv", () => {
     expect(csv).toContain('"kx9m12@alignerrworkforce.com"');
     expect(csv).toContain('"primary_programming_language"');
     expect(csv).toContain('"secondary_programming_languages"');
+    expect(csv).toContain('"session_count"');
+    expect(csv).toContain('"calculated_hours"');
+    expect(csv).toContain('"total_hours_override"');
+    expect(csv).toContain('"reported_hours"');
     expect(csv).toContain('"TypeScript"');
     expect(csv).toContain('"Python, SQL"');
+    expect(csv).toContain('"2"');
+    expect(csv).toContain('"1.5"');
+    expect(csv).toContain('"1.75"');
     expect(csv).toContain('"Reviewed ""quoted"" output"');
     expect(csv).toContain('"1: Debugging; 2: Code review; 3: Testing; 4: Communication; 5: Root Cause Analysis"');
     expect(csv.split("\n")).toHaveLength(3);

@@ -21,6 +21,13 @@ function formatDate(value: string) {
   return date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 }
 
+function formatHours(value: number) {
+  return value.toLocaleString([], {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+}
+
 export function AdminPortal({ adminEmail }: { adminEmail: string }) {
   const [entries, setEntries] = useState<AdminTimesheetRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -124,6 +131,7 @@ export function AdminPortal({ adminEmail }: { adminEmail: string }) {
                     <th className="px-4 py-3">Workforce email</th>
                     <th className="px-4 py-3">Languages</th>
                     <th className="px-4 py-3">Time</th>
+                    <th className="px-4 py-3">Hours</th>
                     <th className="px-4 py-3">Turns</th>
                     <th className="px-4 py-3">Tokens</th>
                     <th className="px-4 py-3">Blocked</th>
@@ -150,6 +158,14 @@ export function AdminPortal({ adminEmail }: { adminEmail: string }) {
                         {formatDate(entry.startAt)}
                         <br />
                         {formatDate(entry.endAt)}
+                      </td>
+                      <td className="px-4 py-3 text-stone-700">
+                        {formatHours(entry.reportedHours)}
+                        {entry.totalHoursOverride !== null ? (
+                          <span className="block text-xs text-stone-500">
+                            Auto: {formatHours(entry.calculatedHours)}
+                          </span>
+                        ) : null}
                       </td>
                       <td className="px-4 py-3 text-stone-700">{entry.turns.length}</td>
                       <td className="px-4 py-3 text-stone-700">

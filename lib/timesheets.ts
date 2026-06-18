@@ -3,6 +3,7 @@ import { userOwnsEntry } from "@/lib/authz";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import type { TaskType } from "@/lib/task-types";
 import type { AdminTimesheetRecord, TimesheetInput, TimesheetRecord } from "@/lib/types";
+import { calculateWorkSessionHours, deriveSessionBounds, reportedHours } from "@/lib/work-sessions";
 
 type EntryRow = {
   id: string;
@@ -15,6 +16,7 @@ type EntryRow = {
   task_url: string;
   start_at: string;
   end_at: string;
+  total_hours_override?: number | string | null;
   summary: string;
   comments: string | null;
   token_usage: number | null;
@@ -22,11 +24,18 @@ type EntryRow = {
   created_at: string;
   updated_at: string;
   timesheet_turns?: TurnRow[];
+  timesheet_work_sessions?: WorkSessionRow[];
 };
 
 type TurnRow = {
   turn_number: number;
   task_type: TaskType;
+};
+
+type WorkSessionRow = {
+  session_number: number;
+  start_at: string;
+  end_at: string;
 };
 
 type OwnershipRow = {
@@ -40,6 +49,49 @@ type DebugRecord = TimesheetRecord & {
 
 const debugRecords: DebugRecord[] = [];
 const ADMIN_PAGE_SIZE = 1000;
+const USER_SELECT =
+  "id, auth0_email, workforce_email, primary_programming_language, secondary_programming_languages, live_compare_problem_id, task_url, start_at, end_at, total_hours_override, summary, comments, token_usage, blocked_on_taiga_bug, created_at, updated_at, timesheet_turns(turn_number, task_type), timesheet_work_sessions(session_number, start_at, end_at)";
+const ADMIN_SELECT =
+  "id, auth0_user_id, auth0_email, workforce_email, primary_programming_language, secondary_programming_languages, live_compare_problem_id, task_url, start_at, end_at, total_hours_override, summary, comments, token_usage, blocked_on_taiga_bug, created_at, updated_at, timesheet_turns(turn_number, task_type), timesheet_work_sessions(session_number, start_at, end_at)";
+
+function nullableNumber(value: number | string | null | undefined) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function workSessionsFromRow(row: EntryRow) {
+  const sessions = [...(row.timesheet_work_sessions ?? [])]
+    .sort((a, b) => a.session_number - b.session_number)
+    .map((session) => ({
+      sessionNumber: session.session_number,
+      startAt: session.start_at,
+      endAt: session.end_at
+    }));
+
+  if (sessions.length > 0) {
+    return sessions;
+  }
+
+  return [
+    {
+      sessionNumber: 1,
+      startAt: row.start_at,
+      endAt: row.end_at
+    }
+  ];
+}
+
+function normalizedInputSessions(input: TimesheetInput) {
+  return input.workSessions.map((session) => ({
+    sessionNumber: session.sessionNumber,
+    startAt: new Date(session.startAt).toISOString(),
+    endAt: new Date(session.endAt).toISOString()
+  }));
+}
 
 function toPublicDebugRecord(record: DebugRecord): TimesheetRecord {
   return {
@@ -50,8 +102,12 @@ function toPublicDebugRecord(record: DebugRecord): TimesheetRecord {
     secondaryProgrammingLanguages: record.secondaryProgrammingLanguages,
     liveCompareProblemId: record.liveCompareProblemId,
     taskUrl: record.taskUrl,
+    workSessions: record.workSessions,
+    totalHoursOverride: record.totalHoursOverride,
     startAt: record.startAt,
     endAt: record.endAt,
+    calculatedHours: record.calculatedHours,
+    reportedHours: record.reportedHours,
     summary: record.summary,
     comments: record.comments,
     tokenUsage: record.tokenUsage,
@@ -70,6 +126,10 @@ function toPublicAdminDebugRecord(record: DebugRecord): AdminTimesheetRecord {
 }
 
 function toRecord(row: EntryRow): TimesheetRecord {
+  const workSessions = workSessionsFromRow(row);
+  const calculatedHours = calculateWorkSessionHours(workSessions);
+  const totalHoursOverride = nullableNumber(row.total_hours_override);
+
   return {
     id: row.id,
     auth0Email: row.auth0_email,
@@ -78,8 +138,12 @@ function toRecord(row: EntryRow): TimesheetRecord {
     secondaryProgrammingLanguages: row.secondary_programming_languages ?? null,
     liveCompareProblemId: row.live_compare_problem_id,
     taskUrl: row.task_url,
+    workSessions,
+    totalHoursOverride,
     startAt: row.start_at,
     endAt: row.end_at,
+    calculatedHours,
+    reportedHours: reportedHours(calculatedHours, totalHoursOverride),
     summary: row.summary,
     comments: row.comments,
     tokenUsage: row.token_usage,
@@ -103,6 +167,9 @@ function toAdminRecord(row: EntryRow): AdminTimesheetRecord {
 }
 
 function entryPayload(input: TimesheetInput, auth0UserId: string, auth0Email: string | null) {
+  const workSessions = normalizedInputSessions(input);
+  const { startAt, endAt } = deriveSessionBounds(workSessions);
+
   return {
     auth0_user_id: auth0UserId,
     auth0_email: auth0Email,
@@ -111,8 +178,9 @@ function entryPayload(input: TimesheetInput, auth0UserId: string, auth0Email: st
     secondary_programming_languages: input.secondaryProgrammingLanguages,
     live_compare_problem_id: input.liveCompareProblemId,
     task_url: input.taskUrl,
-    start_at: new Date(input.startAt).toISOString(),
-    end_at: new Date(input.endAt).toISOString(),
+    start_at: startAt,
+    end_at: endAt,
+    total_hours_override: input.totalHoursOverride,
     summary: input.summary,
     comments: input.comments,
     token_usage: input.tokenUsage,
@@ -132,9 +200,7 @@ export async function listTimesheetsForUser(auth0UserId: string) {
 
   const { data, error } = await supabase
     .from("timesheet_entries")
-    .select(
-      "id, auth0_email, workforce_email, primary_programming_language, secondary_programming_languages, live_compare_problem_id, task_url, start_at, end_at, summary, comments, token_usage, blocked_on_taiga_bug, created_at, updated_at, timesheet_turns(turn_number, task_type)"
-    )
+    .select(USER_SELECT)
     .eq("auth0_user_id", auth0UserId)
     .order("created_at", { ascending: false });
 
@@ -158,9 +224,7 @@ export async function listAllTimesheets() {
   for (let from = 0; ; from += ADMIN_PAGE_SIZE) {
     const { data, error } = await supabase
       .from("timesheet_entries")
-      .select(
-        "id, auth0_user_id, auth0_email, workforce_email, primary_programming_language, secondary_programming_languages, live_compare_problem_id, task_url, start_at, end_at, summary, comments, token_usage, blocked_on_taiga_bug, created_at, updated_at, timesheet_turns(turn_number, task_type)"
-      )
+      .select(ADMIN_SELECT)
       .order("created_at", { ascending: false })
       .range(from, from + ADMIN_PAGE_SIZE - 1);
 
@@ -204,9 +268,7 @@ export async function getTimesheetForUser(id: string, auth0UserId: string) {
 
   const { data, error } = await supabase
     .from("timesheet_entries")
-    .select(
-      "id, auth0_email, workforce_email, primary_programming_language, secondary_programming_languages, live_compare_problem_id, task_url, start_at, end_at, summary, comments, token_usage, blocked_on_taiga_bug, created_at, updated_at, timesheet_turns(turn_number, task_type)"
-    )
+    .select(USER_SELECT)
     .eq("id", id)
     .eq("auth0_user_id", auth0UserId)
     .single();
@@ -221,6 +283,9 @@ export async function getTimesheetForUser(id: string, auth0UserId: string) {
 export async function createTimesheet(input: TimesheetInput, auth0UserId: string, auth0Email: string | null) {
   if (isDebugAuthBypassEnabled()) {
     const now = new Date().toISOString();
+    const workSessions = normalizedInputSessions(input);
+    const { startAt, endAt } = deriveSessionBounds(workSessions);
+    const calculatedHours = calculateWorkSessionHours(workSessions);
     const record: DebugRecord = {
       id: crypto.randomUUID(),
       auth0UserId,
@@ -230,8 +295,12 @@ export async function createTimesheet(input: TimesheetInput, auth0UserId: string
       secondaryProgrammingLanguages: input.secondaryProgrammingLanguages,
       liveCompareProblemId: input.liveCompareProblemId,
       taskUrl: input.taskUrl,
-      startAt: new Date(input.startAt).toISOString(),
-      endAt: new Date(input.endAt).toISOString(),
+      workSessions,
+      totalHoursOverride: input.totalHoursOverride,
+      startAt,
+      endAt,
+      calculatedHours,
+      reportedHours: reportedHours(calculatedHours, input.totalHoursOverride),
       summary: input.summary,
       comments: input.comments,
       tokenUsage: input.tokenUsage,
@@ -270,6 +339,20 @@ export async function createTimesheet(input: TimesheetInput, auth0UserId: string
     throw turnsError;
   }
 
+  const workSessions = input.workSessions.map((session) => ({
+    entry_id: entry.id,
+    session_number: session.sessionNumber,
+    start_at: new Date(session.startAt).toISOString(),
+    end_at: new Date(session.endAt).toISOString()
+  }));
+
+  const { error: workSessionsError } = await supabase.from("timesheet_work_sessions").insert(workSessions);
+
+  if (workSessionsError) {
+    await supabase.from("timesheet_entries").delete().eq("id", entry.id).eq("auth0_user_id", auth0UserId);
+    throw workSessionsError;
+  }
+
   return getTimesheetForUser(entry.id, auth0UserId);
 }
 
@@ -287,6 +370,9 @@ export async function updateTimesheet(
     }
 
     const existing = debugRecords[index];
+    const workSessions = normalizedInputSessions(input);
+    const { startAt, endAt } = deriveSessionBounds(workSessions);
+    const calculatedHours = calculateWorkSessionHours(workSessions);
     const updated: DebugRecord = {
       ...existing,
       auth0Email,
@@ -295,8 +381,12 @@ export async function updateTimesheet(
       secondaryProgrammingLanguages: input.secondaryProgrammingLanguages,
       liveCompareProblemId: input.liveCompareProblemId,
       taskUrl: input.taskUrl,
-      startAt: new Date(input.startAt).toISOString(),
-      endAt: new Date(input.endAt).toISOString(),
+      workSessions,
+      totalHoursOverride: input.totalHoursOverride,
+      startAt,
+      endAt,
+      calculatedHours,
+      reportedHours: reportedHours(calculatedHours, input.totalHoursOverride),
       summary: input.summary,
       comments: input.comments,
       tokenUsage: input.tokenUsage,
@@ -351,6 +441,25 @@ export async function updateTimesheet(
 
   if (turnsError) {
     throw turnsError;
+  }
+
+  const { error: deleteSessionsError } = await supabase.from("timesheet_work_sessions").delete().eq("entry_id", id);
+
+  if (deleteSessionsError) {
+    throw deleteSessionsError;
+  }
+
+  const workSessions = input.workSessions.map((session) => ({
+    entry_id: id,
+    session_number: session.sessionNumber,
+    start_at: new Date(session.startAt).toISOString(),
+    end_at: new Date(session.endAt).toISOString()
+  }));
+
+  const { error: workSessionsError } = await supabase.from("timesheet_work_sessions").insert(workSessions);
+
+  if (workSessionsError) {
+    throw workSessionsError;
   }
 
   return getTimesheetForUser(id, auth0UserId);

@@ -7,8 +7,14 @@ function payloadFor(suffix, workforceEmail, tokenUsage) {
     secondaryProgrammingLanguages: suffix === "001" ? "SQL" : "JavaScript",
     liveCompareProblemId: `LC-SCRIPT-${suffix}`,
     taskUrl: `https://taiga.example/tasks/LC-SCRIPT-${suffix}`,
-    startAt: "2026-06-16T09:00",
-    endAt: "2026-06-16T10:00",
+    workSessions: [
+      {
+        sessionNumber: 1,
+        startAt: "2026-06-16T09:00",
+        endAt: "2026-06-16T10:00"
+      }
+    ],
+    totalHoursOverride: null,
     summary: `Scripted end-to-end check for ${suffix}.`,
     comments: "Created by scripts/e2e-api.mjs.",
     tokenUsage,
@@ -99,6 +105,8 @@ assert(created.entry.primaryProgrammingLanguage === "TypeScript", "Expected prim
 assert(created.entry.secondaryProgrammingLanguages === "SQL", "Expected secondary language to round-trip.");
 assert(created.entry.auth0Email === "script-user-one@labelbox.com", "Expected temporary login email to be stored.");
 assert(created.entry.turns.length === 5, "Expected five created turns.");
+assert(created.entry.calculatedHours === 1, "Expected one calculated hour.");
+assert(created.entry.reportedHours === 1, "Expected reported hours to default to calculated hours.");
 
 const listed = await request("/api/timesheets");
 assert(
@@ -109,6 +117,7 @@ assert(
 const updatedPayload = {
   ...payload,
   summary: "Updated scripted end-to-end check for the timesheet API.",
+  totalHoursOverride: 1.25,
   tokenUsage: 9876,
   turns: [...payload.turns, { turnNumber: 6, taskType: "Code review" }]
 };
@@ -119,6 +128,7 @@ const updated = await request(`/api/timesheets/${created.entry.id}`, {
 });
 assert(updated.entry.tokenUsage === 9876, "Expected updated token usage.");
 assert(updated.entry.turns.length === 6, "Expected updated sixth turn.");
+assert(updated.entry.reportedHours === 1.25, "Expected updated reported hours override.");
 
 await setDebugUser("script-user-two@labelbox.com", "Script User Two");
 const secondPayload = payloadFor("002", "ab12cd@alignerrworkforce.com", 2222);

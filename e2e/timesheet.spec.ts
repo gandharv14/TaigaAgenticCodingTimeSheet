@@ -58,8 +58,14 @@ async function createTimesheet(page: Page, payload: TestPayload) {
   await page.getByLabel("Primary programming language").fill(payload.primaryProgrammingLanguage);
   await page.getByLabel("Secondary programming languages").fill(payload.secondaryProgrammingLanguages);
   await page.getByLabel("Task URL").fill(payload.taskUrl);
-  await page.getByLabel("Start time").fill("2026-06-16T09:00");
-  await page.getByLabel("End time").fill("2026-06-16T10:15");
+  await page.getByLabel("Session 1 start time").fill("2026-06-16T09:00");
+  await page.getByLabel("Session 1 end time").fill("2026-06-16T10:15");
+  await expect(page.getByLabel("Total hours")).toHaveValue("1.25");
+  await page.getByRole("button", { name: "Add work session" }).click();
+  await page.getByLabel("Session 2 start time").fill("2026-06-16T14:00");
+  await page.getByLabel("Session 2 end time").fill("2026-06-16T15:00");
+  await expect(page.getByLabel("Total hours")).toHaveValue("2.25");
+  await page.getByLabel("Total hours").fill("2.5");
 
   await expect(page.getByLabel("Number of turns")).toHaveValue("5");
   await page.getByLabel("Increase turns").click();
@@ -81,6 +87,7 @@ async function createTimesheet(page: Page, payload: TestPayload) {
   await expect(page.getByRole("heading", { name: "My history" })).toBeVisible();
   await expect(page.getByText(payload.problemId)).toBeVisible();
   await expect(page.getByText("6 turns")).toBeVisible();
+  await expect(page.getByText("2.50 hours (override)")).toBeVisible();
   await expect(page.getByText(`${Number(payload.tokenUsage).toLocaleString()} tokens`)).toBeVisible();
   await expect(page.getByText(payload.primaryProgrammingLanguage)).toBeVisible();
   await expect(page.getByText("Taiga blocked")).toBeVisible();
@@ -110,6 +117,7 @@ test("debug user can create and edit a timesheet", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Edit timesheet" })).toBeVisible();
   await expect(page.getByLabel("Google Workforce email")).toHaveValue(firstUser.workforceEmail);
   await expect(page.getByLabel("Primary programming language")).toHaveValue(firstUser.primaryProgrammingLanguage);
+  await expect(page.getByLabel("Total hours")).toHaveValue("2.5");
   await page.getByLabel("Token usage").fill("7777");
   await page.getByLabel("Any comments").fill("Updated during Playwright end-to-end coverage.");
   await page.getByRole("button", { name: "Update timesheet" }).click();

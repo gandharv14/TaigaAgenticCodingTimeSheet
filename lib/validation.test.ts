@@ -8,8 +8,14 @@ const validPayload = {
   secondaryProgrammingLanguages: "Python, SQL",
   liveCompareProblemId: "LC-123",
   taskUrl: "https://example.com/tasks/LC-123",
-  startAt: "2026-06-15T09:00",
-  endAt: "2026-06-15T10:00",
+  workSessions: [
+    {
+      sessionNumber: 1,
+      startAt: "2026-06-15T09:00",
+      endAt: "2026-06-15T10:00"
+    }
+  ],
+  totalHoursOverride: null,
   summary: "Investigated the task and implemented the requested fix.",
   comments: null,
   tokenUsage: 1200,
@@ -46,7 +52,51 @@ describe("timesheet validation", () => {
   it("requires end time to be after start time", () => {
     const result = validateTimesheetInput({
       ...validPayload,
-      endAt: "2026-06-15T08:59"
+      workSessions: [
+        {
+          sessionNumber: 1,
+          startAt: "2026-06-15T09:00",
+          endAt: "2026-06-15T08:59"
+        }
+      ]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects overlapping work sessions", () => {
+    const result = validateTimesheetInput({
+      ...validPayload,
+      workSessions: [
+        {
+          sessionNumber: 1,
+          startAt: "2026-06-15T09:00",
+          endAt: "2026-06-15T10:00"
+        },
+        {
+          sessionNumber: 2,
+          startAt: "2026-06-15T09:30",
+          endAt: "2026-06-15T11:00"
+        }
+      ]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts a nonnegative hours override", () => {
+    const result = validateTimesheetInput({
+      ...validPayload,
+      totalHoursOverride: 1.5
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects negative hours overrides", () => {
+    const result = validateTimesheetInput({
+      ...validPayload,
+      totalHoursOverride: -1
     });
 
     expect(result.success).toBe(false);

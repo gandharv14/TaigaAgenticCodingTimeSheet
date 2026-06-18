@@ -21,6 +21,12 @@ import { TASK_TYPES } from "@/lib/task-types";
 import type { TaskType } from "@/lib/task-types";
 import type { TimesheetInput, TimesheetRecord, UserProfileRecord } from "@/lib/types";
 import { countWords } from "@/lib/validation";
+import { calculateWorkSessionHours } from "@/lib/work-sessions";
+
+type FormWorkSession = {
+  startAt: string;
+  endAt: string;
+};
 
 type FormState = {
   workforceEmail: string;
@@ -28,8 +34,9 @@ type FormState = {
   secondaryProgrammingLanguages: string;
   liveCompareProblemId: string;
   taskUrl: string;
-  startAt: string;
-  endAt: string;
+  workSessions: FormWorkSession[];
+  totalHours: string;
+  usesHoursOverride: boolean;
   summary: string;
   comments: string;
   tokenUsage: string;
@@ -60,8 +67,9 @@ function emptyForm(): FormState {
     secondaryProgrammingLanguages: "",
     liveCompareProblemId: "",
     taskUrl: "",
-    startAt: "",
-    endAt: "",
+    workSessions: [{ startAt: "", endAt: "" }],
+    totalHours: "",
+    usesHoursOverride: false,
     summary: "",
     comments: "",
     tokenUsage: "",
@@ -85,6 +93,34 @@ function dateTimeLocalValue(value: string) {
   return offsetDate.toISOString().slice(0, 16);
 }
 
+function hoursInputValue(value: number) {
+  return Number(value.toFixed(2)).toString();
+}
+
+function formatHours(value: number) {
+  return value.toLocaleString([], {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+}
+
+function workSessionsForCalculation(workSessions: FormWorkSession[]) {
+  return workSessions.map((session, index) => ({
+    sessionNumber: index + 1,
+    startAt: session.startAt,
+    endAt: session.endAt
+  }));
+}
+
+function parseOptionalHours(value: string) {
+  if (value.trim().length === 0) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function toPayload(form: FormState): TimesheetInput {
   return {
     workforceEmail: form.workforceEmail,
@@ -93,8 +129,12 @@ function toPayload(form: FormState): TimesheetInput {
       form.secondaryProgrammingLanguages.trim().length > 0 ? form.secondaryProgrammingLanguages : null,
     liveCompareProblemId: form.liveCompareProblemId,
     taskUrl: form.taskUrl,
-    startAt: form.startAt,
-    endAt: form.endAt,
+    workSessions: form.workSessions.map((session, index) => ({
+      sessionNumber: index + 1,
+      startAt: session.startAt,
+      endAt: session.endAt
+    })),
+    totalHoursOverride: form.usesHoursOverride ? parseOptionalHours(form.totalHours) : null,
     summary: form.summary,
     comments: form.comments.trim().length > 0 ? form.comments : null,
     tokenUsage: form.tokenUsage.trim().length > 0 ? Number(form.tokenUsage) : null,
@@ -113,8 +153,12 @@ function formFromRecord(record: TimesheetRecord): FormState {
     secondaryProgrammingLanguages: record.secondaryProgrammingLanguages ?? "",
     liveCompareProblemId: record.liveCompareProblemId,
     taskUrl: record.taskUrl,
-    startAt: dateTimeLocalValue(record.startAt),
-    endAt: dateTimeLocalValue(record.endAt),
+    workSessions: record.workSessions.map((session) => ({
+      startAt: dateTimeLocalValue(session.startAt),
+      endAt: dateTimeLocalValue(session.endAt)
+    })),
+    totalHours: record.totalHoursOverride === null ? "" : String(record.totalHoursOverride),
+    usesHoursOverride: record.totalHoursOverride !== null,
     summary: record.summary,
     comments: record.comments ?? "",
     tokenUsage: record.tokenUsage === null ? "" : String(record.tokenUsage),
@@ -178,6 +222,12 @@ export function TimesheetApp({
   const [profileNotice, setProfileNotice] = useState<Notice | null>(null);
 
   const summaryWords = useMemo(() => countWords(form.summary), [form.summary]);
+  const calculatedHours = useMemo(
+    () => calculateWorkSessionHours(workSessionsForCalculation(form.workSessions)),
+    [form.workSessions]
+  );
+  const totalHoursInput = form.usesHoursOverride ? form.totalHours : hoursInputValue(calculatedHours);
+  const submittedHours = form.usesHoursOverride ? parseOptionalHours(form.totalHours) : calculatedHours;
   const overSummaryLimit = summaryWords > 100;
 
   useEffect(() => {
@@ -263,6 +313,51 @@ export function TimesheetApp({
     setForm((current) => ({
       ...current,
       [key]: value
+    }));
+  }
+
+  function updateWorkSession(index: number, key: keyof FormWorkSession, value: string) {
+    setForm((current) => ({
+      ...current,
+      workSessions: current.workSessions.map((session, sessionIndex) =>
+        sessionIndex === index ? { ...session, [key]: value } : session
+      )
+    }));
+  }
+
+  function addWorkSession() {
+    setForm((current) => ({
+      ...current,
+      workSessions: [...current.workSessions, { startAt: "", endAt: "" }]
+    }));
+  }
+
+  function removeWorkSession(index: number) {
+    setForm((current) => {
+      if (current.workSessions.length <= 1) {
+        return current;
+      }
+
+      return {
+        ...current,
+        workSessions: current.workSessions.filter((_, sessionIndex) => sessionIndex !== index)
+      };
+    });
+  }
+
+  function updateTotalHours(value: string) {
+    setForm((current) => ({
+      ...current,
+      totalHours: value,
+      usesHoursOverride: true
+    }));
+  }
+
+  function clearHoursOverride() {
+    setForm((current) => ({
+      ...current,
+      totalHours: "",
+      usesHoursOverride: false
     }));
   }
 
@@ -554,29 +649,103 @@ export function TimesheetApp({
               />
             </label>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="block">
-                <span className="text-sm font-medium text-stone-700">Start time</span>
-                <input
-                  className="mt-1 h-11 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
-                  onChange={(event) => updateField("startAt", event.target.value)}
-                  required
-                  type="datetime-local"
-                  value={form.startAt}
-                />
-              </label>
+            <section className="rounded-lg border border-stone-200 bg-stone-50 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-ink">Work sessions</h3>
+                  <p className="text-sm text-stone-600">
+                    Add one row for each time you actively worked on this task. Gaps are excluded from the automatic total.
+                  </p>
+                </div>
+                <span className="w-fit rounded-lg bg-white px-3 py-1 text-sm font-medium text-stone-700">
+                  Auto: {formatHours(calculatedHours)} hours
+                </span>
+              </div>
 
-              <label className="block">
-                <span className="text-sm font-medium text-stone-700">End time</span>
-                <input
-                  className="mt-1 h-11 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
-                  onChange={(event) => updateField("endAt", event.target.value)}
-                  required
-                  type="datetime-local"
-                  value={form.endAt}
-                />
-              </label>
-            </div>
+              <div className="mt-4 space-y-3">
+                {form.workSessions.map((session, index) => (
+                  <div className="rounded-lg border border-stone-200 bg-white p-3" key={index}>
+                    <div className="flex items-center justify-between gap-3">
+                      <h4 className="text-xs font-semibold uppercase tracking-normal text-stone-500">
+                        Session {index + 1}
+                      </h4>
+                      <button
+                        className="inline-flex h-8 items-center rounded-lg border border-stone-300 px-2 text-xs font-medium text-stone-700 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:text-stone-300"
+                        disabled={form.workSessions.length <= 1}
+                        onClick={() => removeWorkSession(index)}
+                        type="button"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <label className="block">
+                        <span className="text-sm font-medium text-stone-700">Session {index + 1} start time</span>
+                        <input
+                          className="mt-1 h-11 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
+                          onChange={(event) => updateWorkSession(index, "startAt", event.target.value)}
+                          required
+                          type="datetime-local"
+                          value={session.startAt}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-sm font-medium text-stone-700">Session {index + 1} end time</span>
+                        <input
+                          className="mt-1 h-11 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
+                          onChange={(event) => updateWorkSession(index, "endAt", event.target.value)}
+                          required
+                          type="datetime-local"
+                          value={session.endAt}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <button
+                className="mt-3 inline-flex h-10 items-center gap-2 rounded-lg border border-stone-300 bg-white px-3 text-sm font-medium text-stone-700 transition hover:bg-stone-50 focus:outline-none focus:ring-2 focus:ring-fern focus:ring-offset-2"
+                onClick={addWorkSession}
+                type="button"
+              >
+                <Plus aria-hidden="true" className="h-4 w-4" />
+                Add work session
+              </button>
+
+              <div className="mt-4 grid gap-4 rounded-lg border border-stone-200 bg-white p-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                <label className="block">
+                  <span className="text-sm font-medium text-stone-700">Total hours</span>
+                  <input
+                    className="mt-1 h-11 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
+                    min={0}
+                    onChange={(event) => updateTotalHours(event.target.value)}
+                    step="0.01"
+                    type="number"
+                    value={totalHoursInput}
+                  />
+                  <span className="mt-1 block text-xs leading-5 text-stone-600">
+                    {form.usesHoursOverride
+                      ? `Override active. Auto-calculated value is ${formatHours(calculatedHours)} hours.`
+                      : "Auto-calculated from work sessions. Edit this field to override."}
+                  </span>
+                </label>
+                <div className="flex flex-col gap-2 sm:flex-row md:flex-col">
+                  <span className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-900">
+                    Submitted: {formatHours(submittedHours ?? calculatedHours)} hours
+                  </span>
+                  {form.usesHoursOverride ? (
+                    <button
+                      className="inline-flex h-10 items-center justify-center rounded-lg border border-stone-300 px-3 text-sm font-medium text-stone-700 transition hover:bg-stone-50"
+                      onClick={clearHoursOverride}
+                      type="button"
+                    >
+                      Clear override
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </section>
 
             <section className="rounded-lg border border-stone-200 bg-stone-50 p-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -832,6 +1001,9 @@ export function TimesheetApp({
                     <span className="rounded-lg bg-stone-100 px-2 py-1">{entry.secondaryProgrammingLanguages}</span>
                   ) : null}
                   <span className="rounded-lg bg-stone-100 px-2 py-1">{entry.turns.length} turns</span>
+                  <span className="rounded-lg bg-stone-100 px-2 py-1">
+                    {formatHours(entry.reportedHours)} hours{entry.totalHoursOverride !== null ? " (override)" : ""}
+                  </span>
                   {entry.tokenUsage !== null ? (
                     <span className="rounded-lg bg-stone-100 px-2 py-1">{entry.tokenUsage.toLocaleString()} tokens</span>
                   ) : null}
