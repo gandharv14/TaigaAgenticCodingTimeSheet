@@ -137,7 +137,7 @@ function toPayload(form: FormState): TimesheetInput {
     totalHoursOverride: form.usesHoursOverride ? parseOptionalHours(form.totalHours) : null,
     summary: form.summary,
     comments: form.comments.trim().length > 0 ? form.comments : null,
-    tokenUsage: form.tokenUsage.trim().length > 0 ? Number(form.tokenUsage) : null,
+    tokenUsage: Number(form.tokenUsage),
     blockedOnTaigaBug: form.blockedOnTaigaBug,
     turns: form.turns.map((taskType, index) => ({
       turnNumber: index + 1,
@@ -826,6 +826,7 @@ export function TimesheetApp({
                   className="mt-1 h-11 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
                   min={0}
                   onChange={(event) => updateField("tokenUsage", event.target.value)}
+                  required
                   type="number"
                   value={form.tokenUsage}
                 />

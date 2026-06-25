@@ -102,6 +102,15 @@ describe("timesheet validation", () => {
     expect(result.success).toBe(false);
   });
 
+  it("requires token usage", () => {
+    const result = validateTimesheetInput({
+      ...validPayload,
+      tokenUsage: null
+    });
+
+    expect(result.success).toBe(false);
+  });
+
   it("rejects task types outside the allowed set", () => {
     const result = validateTimesheetInput({
       ...validPayload,
