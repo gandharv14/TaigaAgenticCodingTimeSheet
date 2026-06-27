@@ -1,0 +1,281 @@
+import { TASK_TYPES, type TaskType } from "@/lib/task-types";
+import type { AdminTimesheetRecord } from "@/lib/types";
+
+export const IDEAL_CATEGORY_SHARE = {
+  Debugging: 15,
+  "Root Cause Analysis": 10,
+  "System-Level Investigation": 10,
+  "Code writing": 15,
+  "Code review": 10,
+  "Exploration & learning": 5,
+  "Maintenance & ops tooling": 10,
+  "Planning & requirements": 5,
+  Design: 5,
+  Testing: 5,
+  "Deployment & infra": 5,
+  Communication: 5
+} satisfies Record<TaskType, number>;
+
+export const TOKEN_USAGE_BINS = [
+  { label: "0-0.5M", lower: 0, upper: 500_000 },
+  { label: "0.5-0.75M", lower: 500_000, upper: 750_000 },
+  { label: "0.75-1M", lower: 750_000, upper: 1_000_000 },
+  { label: "1-1.25M", lower: 1_000_000, upper: 1_250_000 },
+  { label: "1.25-1.5M", lower: 1_250_000, upper: 1_500_000 },
+  { label: "1.5-1.75M", lower: 1_500_000, upper: 1_750_000 },
+  { label: "1.75-2M", lower: 1_750_000, upper: 2_000_000 },
+  { label: "2-2.5M", lower: 2_000_000, upper: 2_500_000 },
+  { label: "2.5-3M", lower: 2_500_000, upper: 3_000_000 },
+  { label: "3-3.2M", lower: 3_000_000, upper: 3_200_000 },
+  { label: "3.2-5M", lower: 3_200_000, upper: 5_000_000 },
+  { label: "5-10M", lower: 5_000_000, upper: 10_000_000 },
+  { label: "10-20M", lower: 10_000_000, upper: 20_000_000 },
+  { label: "20M-70M", lower: 20_000_000, upper: null }
+] as const;
+
+export type CategoryAnalyticsRow = {
+  category: TaskType;
+  count: number;
+  share: number;
+  averagePerTask: number;
+  idealShare: number;
+  deltaShare: number;
+};
+
+export type TokenHistogramBin = {
+  label: string;
+  lower: number;
+  upper: number | null;
+  count: number;
+  isOutlierBucket: boolean;
+};
+
+export type TokenScatterPoint = {
+  id: string;
+  label: string;
+  x: number;
+  tokenUsage: number;
+  logTokenUsage: number;
+  isOutlier: boolean;
+};
+
+export type TokenScatterAnalytics = {
+  xLabel: string;
+  points: TokenScatterPoint[];
+  correlation: number | null;
+  xMin: number;
+  xMax: number;
+};
+
+export type TokenUsageAnalytics = {
+  reportedRows: number;
+  blankRows: number;
+  min: number | null;
+  max: number | null;
+  mean: number | null;
+  median: number | null;
+  q1: number | null;
+  q3: number | null;
+  iqr: number | null;
+  highOutlierCutoff: number | null;
+  outlierCount: number;
+  histogramBins: TokenHistogramBin[];
+  turnsScatter: TokenScatterAnalytics;
+  hoursScatter: TokenScatterAnalytics;
+};
+
+export type AdminAnalytics = {
+  taskCount: number;
+  totalTurns: number;
+  categoryRows: CategoryAnalyticsRow[];
+  categoryRowsByCount: CategoryAnalyticsRow[];
+  tokenUsage: TokenUsageAnalytics;
+};
+
+function round(value: number, digits: number) {
+  const scale = 10 ** digits;
+  return Math.round((value + Number.EPSILON) * scale) / scale;
+}
+
+function percentile(sortedValues: number[], percentileValue: number) {
+  if (sortedValues.length === 0) {
+    return null;
+  }
+
+  const index = (sortedValues.length - 1) * percentileValue;
+  const lowerIndex = Math.floor(index);
+  const upperIndex = Math.ceil(index);
+  const lowerValue = sortedValues[lowerIndex];
+  const upperValue = sortedValues[upperIndex];
+
+  if (lowerValue === undefined || upperValue === undefined) {
+    return null;
+  }
+
+  if (lowerIndex === upperIndex) {
+    return lowerValue;
+  }
+
+  return lowerValue + (upperValue - lowerValue) * (index - lowerIndex);
+}
+
+function average(values: number[]) {
+  if (values.length === 0) {
+    return null;
+  }
+
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function pearsonCorrelation(xValues: number[], yValues: number[]) {
+  if (xValues.length !== yValues.length || xValues.length < 2) {
+    return null;
+  }
+
+  const xAverage = average(xValues);
+  const yAverage = average(yValues);
+
+  if (xAverage === null || yAverage === null) {
+    return null;
+  }
+
+  let covariance = 0;
+  let xVariance = 0;
+  let yVariance = 0;
+
+  for (let index = 0; index < xValues.length; index += 1) {
+    const xDelta = xValues[index] - xAverage;
+    const yDelta = yValues[index] - yAverage;
+    covariance += xDelta * yDelta;
+    xVariance += xDelta ** 2;
+    yVariance += yDelta ** 2;
+  }
+
+  if (xVariance === 0 || yVariance === 0) {
+    return null;
+  }
+
+  return covariance / Math.sqrt(xVariance * yVariance);
+}
+
+function tokenValues(entries: AdminTimesheetRecord[]) {
+  return entries
+    .map((entry) => entry.tokenUsage)
+    .filter((tokenUsage): tokenUsage is number => tokenUsage !== null && Number.isFinite(tokenUsage));
+}
+
+function buildHistogramBins(values: number[], highOutlierCutoff: number | null): TokenHistogramBin[] {
+  return TOKEN_USAGE_BINS.map((bin) => {
+    const count = values.filter((value) => value >= bin.lower && (bin.upper === null || value < bin.upper)).length;
+
+    return {
+      ...bin,
+      count,
+      isOutlierBucket: highOutlierCutoff !== null && bin.lower >= highOutlierCutoff
+    };
+  });
+}
+
+function buildScatter(
+  entries: AdminTimesheetRecord[],
+  highOutlierCutoff: number | null,
+  xLabel: string,
+  xValue: (entry: AdminTimesheetRecord) => number
+): TokenScatterAnalytics {
+  const points = entries.flatMap((entry) => {
+    if (entry.tokenUsage === null || entry.tokenUsage <= 0 || !Number.isFinite(entry.tokenUsage)) {
+      return [];
+    }
+
+    const x = xValue(entry);
+
+    if (!Number.isFinite(x)) {
+      return [];
+    }
+
+    return [
+      {
+        id: entry.id,
+        label: entry.liveCompareProblemId,
+        x,
+        tokenUsage: entry.tokenUsage,
+        logTokenUsage: Math.log10(entry.tokenUsage),
+        isOutlier: highOutlierCutoff !== null && entry.tokenUsage > highOutlierCutoff
+      }
+    ];
+  });
+  const xValues = points.map((point) => point.x);
+  const yValues = points.map((point) => point.logTokenUsage);
+  const xMax = Math.max(0, ...xValues);
+
+  return {
+    xLabel,
+    points,
+    correlation: pearsonCorrelation(xValues, yValues),
+    xMin: 0,
+    xMax
+  };
+}
+
+function summarizeTokenUsage(entries: AdminTimesheetRecord[]): TokenUsageAnalytics {
+  const values = tokenValues(entries);
+  const sortedValues = [...values].sort((a, b) => a - b);
+  const q1 = percentile(sortedValues, 0.25);
+  const median = percentile(sortedValues, 0.5);
+  const q3 = percentile(sortedValues, 0.75);
+  const iqr = q1 !== null && q3 !== null ? q3 - q1 : null;
+  const highOutlierCutoff = q3 !== null && iqr !== null ? q3 + 1.5 * iqr : null;
+  const outlierCount = highOutlierCutoff === null ? 0 : values.filter((value) => value > highOutlierCutoff).length;
+
+  return {
+    reportedRows: values.length,
+    blankRows: entries.length - values.length,
+    min: sortedValues[0] ?? null,
+    max: sortedValues[sortedValues.length - 1] ?? null,
+    mean: average(values),
+    median,
+    q1,
+    q3,
+    iqr,
+    highOutlierCutoff,
+    outlierCount,
+    histogramBins: buildHistogramBins(values, highOutlierCutoff),
+    turnsScatter: buildScatter(entries, highOutlierCutoff, "Turn count per timesheet", (entry) => entry.turns.length),
+    hoursScatter: buildScatter(entries, highOutlierCutoff, "Reported hours per problem", (entry) => entry.reportedHours)
+  };
+}
+
+export function summarizeAdminAnalytics(entries: AdminTimesheetRecord[]): AdminAnalytics {
+  const counts = new Map<TaskType, number>(TASK_TYPES.map((taskType) => [taskType, 0]));
+
+  for (const entry of entries) {
+    for (const turn of entry.turns) {
+      counts.set(turn.taskType, (counts.get(turn.taskType) ?? 0) + 1);
+    }
+  }
+
+  const totalTurns = [...counts.values()].reduce((sum, count) => sum + count, 0);
+  const categoryRows = TASK_TYPES.map((category) => {
+    const count = counts.get(category) ?? 0;
+    const share = totalTurns === 0 ? 0 : round((count / totalTurns) * 100, 1);
+    const averagePerTask = entries.length === 0 ? 0 : round(count / entries.length, 2);
+    const idealShare = IDEAL_CATEGORY_SHARE[category];
+
+    return {
+      category,
+      count,
+      share,
+      averagePerTask,
+      idealShare,
+      deltaShare: round(share - idealShare, 1)
+    };
+  });
+
+  return {
+    taskCount: entries.length,
+    totalTurns,
+    categoryRows,
+    categoryRowsByCount: [...categoryRows].sort((a, b) => b.count - a.count || TASK_TYPES.indexOf(a.category) - TASK_TYPES.indexOf(b.category)),
+    tokenUsage: summarizeTokenUsage(entries)
+  };
+}

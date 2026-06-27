@@ -154,6 +154,20 @@ test("admin can view all timesheets and download CSV", async ({ page }) => {
   await expect(page.getByText(secondUser.loginEmail)).toBeVisible();
   await expect(page.getByText(firstUser.primaryProgrammingLanguage)).toBeVisible();
   await expect(page.getByText(secondUser.primaryProgrammingLanguage)).toBeVisible();
+  await expect(page.getByText(/Updates every 15s/)).toBeVisible();
+
+  const analytics = page.getByTestId("admin-analytics");
+  await expect(analytics.getByRole("heading", { name: "Raw Category Distribution Across All Turns" })).toBeVisible();
+  await expect(analytics.getByRole("heading", { name: "Category Share Of All Turns" })).toBeVisible();
+  await expect(analytics.getByRole("heading", { name: "Average Category Distribution Per Task" })).toBeVisible();
+  await expect(analytics.getByRole("heading", { name: "Delta vs Ideal Turn Category Distribution" })).toBeVisible();
+  await expect(analytics.getByRole("heading", { name: "Token Usage Distribution" })).toBeVisible();
+  await expect(analytics.getByRole("heading", { name: "Turn Count vs Token Usage" })).toBeVisible();
+  await expect(analytics.getByRole("heading", { name: "Reported Hours vs Token Usage" })).toBeVisible();
+  await expect(analytics.getByText("Total turns")).toBeVisible();
+  await expect(analytics.getByText("12")).toBeVisible();
+  await expect(analytics.getByText("Token rows")).toBeVisible();
+  await expect(analytics.getByText("Debugging")).toBeVisible();
 
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("link", { name: "Download CSV" }).click();
