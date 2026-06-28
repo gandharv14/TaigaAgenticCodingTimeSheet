@@ -166,6 +166,8 @@ test("admin can view all timesheets and download CSV", async ({ page }) => {
   await expect(analytics.getByRole("heading", { name: "Reported Hours vs Token Usage" })).toBeVisible();
   await expect(analytics.getByText("Total turns", { exact: true })).toBeVisible();
   await expect(analytics.getByText("12", { exact: true }).first()).toBeVisible();
+  await expect(analytics.getByText("Average handling time", { exact: true })).toBeVisible();
+  await expect(analytics.getByText("2.50 hrs", { exact: true })).toBeVisible();
   await expect(analytics.getByText("Token rows", { exact: true })).toBeVisible();
   await expect(analytics.getByText("Debugging").first()).toBeVisible();
 

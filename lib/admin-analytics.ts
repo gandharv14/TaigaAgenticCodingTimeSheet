@@ -87,6 +87,7 @@ export type TokenUsageAnalytics = {
 export type AdminAnalytics = {
   taskCount: number;
   totalTurns: number;
+  averageHandlingHours: number;
   categoryRows: CategoryAnalyticsRow[];
   categoryRowsByCount: CategoryAnalyticsRow[];
   tokenUsage: TokenUsageAnalytics;
@@ -166,12 +167,12 @@ function tokenValues(entries: AdminTimesheetRecord[]) {
 
 function buildHistogramBins(values: number[], highOutlierCutoff: number | null): TokenHistogramBin[] {
   return TOKEN_USAGE_BINS.map((bin) => {
-    const count = values.filter((value) => value >= bin.lower && (bin.upper === null || value < bin.upper)).length;
+    const binValues = values.filter((value) => value >= bin.lower && (bin.upper === null || value < bin.upper));
 
     return {
       ...bin,
-      count,
-      isOutlierBucket: highOutlierCutoff !== null && bin.lower >= highOutlierCutoff
+      count: binValues.length,
+      isOutlierBucket: highOutlierCutoff !== null && binValues.some((value) => value > highOutlierCutoff)
     };
   });
 }
@@ -247,6 +248,7 @@ function summarizeTokenUsage(entries: AdminTimesheetRecord[]): TokenUsageAnalyti
 
 export function summarizeAdminAnalytics(entries: AdminTimesheetRecord[]): AdminAnalytics {
   const counts = new Map<TaskType, number>(TASK_TYPES.map((taskType) => [taskType, 0]));
+  const averageHandlingHours = round(average(entries.map((entry) => entry.reportedHours)) ?? 0, 2);
 
   for (const entry of entries) {
     for (const turn of entry.turns) {
@@ -274,6 +276,7 @@ export function summarizeAdminAnalytics(entries: AdminTimesheetRecord[]): AdminA
   return {
     taskCount: entries.length,
     totalTurns,
+    averageHandlingHours,
     categoryRows,
     categoryRowsByCount: [...categoryRows].sort((a, b) => b.count - a.count || TASK_TYPES.indexOf(a.category) - TASK_TYPES.indexOf(b.category)),
     tokenUsage: summarizeTokenUsage(entries)

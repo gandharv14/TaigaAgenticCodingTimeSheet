@@ -189,26 +189,32 @@ function HistogramChart({ analytics }: { analytics: AdminAnalytics }) {
 
   return (
     <div>
-      <div className="flex h-56 items-end gap-2 border-b border-l border-stone-300 px-2 pt-3">
-        {bins.map((bin) => {
-          const height = `${Math.max(bin.count === 0 ? 2 : 8, (bin.count / maxCount) * 100)}%`;
+      <div className="overflow-x-auto pb-1">
+        <div className="min-w-[56rem]">
+          <div className="grid h-64 grid-cols-[repeat(14,minmax(0,1fr))] gap-2 border-b border-l border-stone-300 px-2 pt-3">
+            {bins.map((bin) => {
+              const height = `${Math.max(bin.count === 0 ? 2 : 8, (bin.count / maxCount) * 100)}%`;
 
-          return (
-            <div className="flex min-w-10 flex-1 flex-col items-center justify-end gap-1" key={bin.label}>
-              <span className="text-xs font-semibold text-ink">{formatInteger(bin.count)}</span>
-              <div
-                aria-label={`${bin.label}: ${bin.count} timesheets`}
-                className="w-full rounded-t"
-                style={{ backgroundColor: bin.isOutlierBucket ? CHART_RED : CHART_BLUE, height }}
-              />
-            </div>
-          );
-        })}
-      </div>
-      <div className="mt-2 grid grid-cols-2 gap-2 text-center text-[0.65rem] text-stone-600 sm:grid-cols-7 lg:grid-cols-14">
-        {bins.map((bin) => (
-          <span key={bin.label}>{bin.label}</span>
-        ))}
+              return (
+                <div className="flex h-full flex-col items-center justify-end gap-1" key={bin.label}>
+                  <span className="text-xs font-semibold text-ink">{formatInteger(bin.count)}</span>
+                  <div
+                    aria-label={`${bin.label}: ${bin.count} timesheets`}
+                    className="w-full rounded-t"
+                    style={{ backgroundColor: bin.isOutlierBucket ? CHART_RED : CHART_BLUE, height }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-2 grid grid-cols-[repeat(14,minmax(0,1fr))] gap-2 text-center text-[0.65rem] leading-4 text-stone-600">
+            {bins.map((bin) => (
+              <span className="break-words" key={bin.label}>
+                {bin.label}
+              </span>
+            ))}
+          </div>
+        </div>
       </div>
       <p className="mt-4 rounded-lg border border-stone-200 bg-stone-50 p-3 text-xs leading-5 text-stone-600">
         Reported rows: {formatInteger(analytics.tokenUsage.reportedRows)}; blank token rows:{" "}
@@ -304,13 +310,18 @@ function ScatterPlot({ analytics }: { analytics: TokenScatterAnalytics }) {
 function AnalyticsDashboard({ analytics }: { analytics: AdminAnalytics }) {
   return (
     <section className="mb-6 space-y-6" data-testid="admin-analytics">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <StatCard
           detail={`${formatDecimal(analytics.taskCount === 0 ? 0 : analytics.totalTurns / analytics.taskCount, 2)} turns per task`}
           label="Timesheets"
           value={formatInteger(analytics.taskCount)}
         />
         <StatCard detail="Classified task-category turns" label="Total turns" value={formatInteger(analytics.totalTurns)} />
+        <StatCard
+          detail="Average reported hours per problem"
+          label="Average handling time"
+          value={`${formatDecimal(analytics.averageHandlingHours, 2)} hrs`}
+        />
         <StatCard
           detail={`${formatInteger(analytics.tokenUsage.blankRows)} rows missing token usage`}
           label="Token rows"
