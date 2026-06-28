@@ -80,37 +80,60 @@ describe("summarizeAdminAnalytics", () => {
     });
   });
 
-  it("computes token statistics, outliers, histogram bins, and scatter data", () => {
+  it("filters obvious hour and token outlier rows before computing dashboard metrics", () => {
     const analytics = summarizeAdminAnalytics([
       record("one", ["Debugging"], { tokenUsage: 100, reportedHours: 1 }),
       record("two", ["Debugging"], { tokenUsage: 200, reportedHours: 2 }),
       record("three", ["Debugging"], { tokenUsage: 300, reportedHours: 3 }),
       record("four", ["Debugging"], { tokenUsage: 400, reportedHours: 4 }),
       record("five", ["Debugging"], { tokenUsage: 10_000, reportedHours: 5 }),
-      record("blank", ["Testing"], { tokenUsage: null, reportedHours: 6 })
+      record("blank", ["Testing"], { tokenUsage: null, reportedHours: 6 }),
+      record("long", ["Communication"], { tokenUsage: 500, reportedHours: 100 })
     ]);
 
-    expect(analytics.tokenUsage.reportedRows).toBe(5);
+    expect(analytics.outlierFilter).toMatchObject({
+      totalRows: 7,
+      includedRows: 5,
+      excludedRows: 2,
+      excludedForHours: 1,
+      excludedForTokens: 1,
+      reportedHoursMin: 0,
+      reportedHoursMax: 24
+    });
+    expect(analytics.outlierFilter.tokenUsageMax).toBe(1225);
+    expect(analytics.taskCount).toBe(5);
+    expect(analytics.averageHandlingHours).toBe(3.2);
+    expect(analytics.categoryRows.find((row) => row.category === "Debugging")).toMatchObject({
+      count: 4,
+      averagePerTask: 0.8
+    });
+    expect(analytics.categoryRows.find((row) => row.category === "Testing")).toMatchObject({
+      count: 1,
+      averagePerTask: 0.2
+    });
+    expect(analytics.categoryRows.find((row) => row.category === "Communication")).toMatchObject({
+      count: 0,
+      averagePerTask: 0
+    });
+    expect(analytics.tokenUsage.reportedRows).toBe(4);
     expect(analytics.tokenUsage.blankRows).toBe(1);
     expect(analytics.tokenUsage.min).toBe(100);
-    expect(analytics.tokenUsage.max).toBe(10_000);
-    expect(analytics.tokenUsage.mean).toBe(2_200);
-    expect(analytics.tokenUsage.median).toBe(300);
-    expect(analytics.tokenUsage.q1).toBe(200);
-    expect(analytics.tokenUsage.q3).toBe(400);
-    expect(analytics.tokenUsage.iqr).toBe(200);
-    expect(analytics.tokenUsage.highOutlierCutoff).toBe(700);
-    expect(analytics.tokenUsage.outlierCount).toBe(1);
+    expect(analytics.tokenUsage.max).toBe(400);
+    expect(analytics.tokenUsage.mean).toBe(250);
+    expect(analytics.tokenUsage.median).toBe(250);
+    expect(analytics.tokenUsage.q1).toBe(175);
+    expect(analytics.tokenUsage.q3).toBe(325);
+    expect(analytics.tokenUsage.iqr).toBe(150);
+    expect(analytics.tokenUsage.highOutlierCutoff).toBe(550);
+    expect(analytics.tokenUsage.outlierCount).toBe(0);
     expect(analytics.tokenUsage.histogramBins[0]).toMatchObject({
       label: "0-0.5M",
-      count: 5,
-      isOutlierBucket: true
+      count: 4,
+      isOutlierBucket: false
     });
-    expect(analytics.tokenUsage.turnsScatter.points).toHaveLength(5);
-    expect(analytics.tokenUsage.turnsScatter.points.find((point) => point.label === "LC-FIVE")).toMatchObject({
-      tokenUsage: 10_000,
-      isOutlier: true
-    });
+    expect(analytics.tokenUsage.turnsScatter.points).toHaveLength(4);
+    expect(analytics.tokenUsage.turnsScatter.points.some((point) => point.label === "LC-FIVE")).toBe(false);
+    expect(analytics.tokenUsage.turnsScatter.points.some((point) => point.label === "LC-LONG")).toBe(false);
     expect(analytics.tokenUsage.hoursScatter.correlation).toBeGreaterThan(0);
   });
 
@@ -120,6 +143,16 @@ describe("summarizeAdminAnalytics", () => {
     expect(analytics.taskCount).toBe(0);
     expect(analytics.totalTurns).toBe(0);
     expect(analytics.averageHandlingHours).toBe(0);
+    expect(analytics.outlierFilter).toMatchObject({
+      totalRows: 0,
+      includedRows: 0,
+      excludedRows: 0,
+      excludedForHours: 0,
+      excludedForTokens: 0,
+      reportedHoursMin: 0,
+      reportedHoursMax: 24,
+      tokenUsageMax: null
+    });
     expect(analytics.categoryRows.every((row) => row.count === 0 && row.share === 0 && row.averagePerTask === 0)).toBe(
       true
     );

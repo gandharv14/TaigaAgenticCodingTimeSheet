@@ -308,12 +308,14 @@ function ScatterPlot({ analytics }: { analytics: TokenScatterAnalytics }) {
 }
 
 function AnalyticsDashboard({ analytics }: { analytics: AdminAnalytics }) {
+  const filter = analytics.outlierFilter;
+
   return (
     <section className="mb-6 space-y-6" data-testid="admin-analytics">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <StatCard
-          detail={`${formatDecimal(analytics.taskCount === 0 ? 0 : analytics.totalTurns / analytics.taskCount, 2)} turns per task`}
-          label="Timesheets"
+          detail={`${filter.includedRows} included of ${filter.totalRows} submitted rows`}
+          label="Timesheets analyzed"
           value={formatInteger(analytics.taskCount)}
         />
         <StatCard detail="Classified task-category turns" label="Total turns" value={formatInteger(analytics.totalTurns)} />
@@ -328,11 +330,18 @@ function AnalyticsDashboard({ analytics }: { analytics: AdminAnalytics }) {
           value={formatInteger(analytics.tokenUsage.reportedRows)}
         />
         <StatCard
-          detail={`IQR fence ${formatTokens(analytics.tokenUsage.highOutlierCutoff)}`}
-          label="Token outliers"
-          value={formatInteger(analytics.tokenUsage.outlierCount)}
+          detail={`Removed above ${formatTokens(filter.tokenUsageMax)}`}
+          label="Token outliers removed"
+          value={formatInteger(filter.excludedForTokens)}
         />
       </div>
+
+      <p className="rounded-lg border border-stone-200 bg-stone-50 p-3 text-xs leading-5 text-stone-600">
+        Filtered out {formatInteger(filter.excludedRows)} obvious outlier rows before calculating dashboard metrics. Hours range:{" "}
+        {formatDecimal(filter.reportedHoursMin, 2)}-{filter.reportedHoursMax === null ? "n/a" : formatDecimal(filter.reportedHoursMax, 2)}{" "}
+        hrs; token cutoff: {formatTokens(filter.tokenUsageMax)}. Reason counts: {formatInteger(filter.excludedForHours)} hour outliers,{" "}
+        {formatInteger(filter.excludedForTokens)} token outliers.
+      </p>
 
       <div className="grid gap-6 xl:grid-cols-2">
         <ChartCard
