@@ -148,8 +148,8 @@ test("admin can view all timesheets and download CSV", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "Admin Portal" })).toBeVisible();
   await expect(page.getByText("2 submissions across all users")).toBeVisible();
-  await expect(page.getByText(firstUser.problemId)).toBeVisible();
-  await expect(page.getByText(secondUser.problemId)).toBeVisible();
+  await expect(page.getByRole("link", { name: firstUser.problemId })).toBeVisible();
+  await expect(page.getByRole("link", { name: secondUser.problemId })).toBeVisible();
   await expect(page.getByText(firstUser.loginEmail)).toBeVisible();
   await expect(page.getByText(secondUser.loginEmail)).toBeVisible();
   await expect(page.getByText(firstUser.primaryProgrammingLanguage)).toBeVisible();
@@ -164,10 +164,10 @@ test("admin can view all timesheets and download CSV", async ({ page }) => {
   await expect(analytics.getByRole("heading", { name: "Token Usage Distribution" })).toBeVisible();
   await expect(analytics.getByRole("heading", { name: "Turn Count vs Token Usage" })).toBeVisible();
   await expect(analytics.getByRole("heading", { name: "Reported Hours vs Token Usage" })).toBeVisible();
-  await expect(analytics.getByText("Total turns")).toBeVisible();
-  await expect(analytics.getByText("12")).toBeVisible();
-  await expect(analytics.getByText("Token rows")).toBeVisible();
-  await expect(analytics.getByText("Debugging")).toBeVisible();
+  await expect(analytics.getByText("Total turns", { exact: true })).toBeVisible();
+  await expect(analytics.getByText("12", { exact: true }).first()).toBeVisible();
+  await expect(analytics.getByText("Token rows", { exact: true })).toBeVisible();
+  await expect(analytics.getByText("Debugging").first()).toBeVisible();
 
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("link", { name: "Download CSV" }).click();

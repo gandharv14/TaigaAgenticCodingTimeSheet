@@ -72,10 +72,7 @@ export const timesheetInputSchema = z
         "Task description must be 100 words or less."
       ),
     comments: nullableTrimmedString,
-    tokenUsage: z.number({
-      required_error: "Token usage is required.",
-      invalid_type_error: "Token usage is required."
-    }).int().nonnegative("Token usage must be zero or greater."),
+    tokenUsage: z.number({ error: "Token usage is required." }).int().nonnegative("Token usage must be zero or greater."),
     blockedOnTaigaBug: z.boolean(),
     turns: z
       .array(

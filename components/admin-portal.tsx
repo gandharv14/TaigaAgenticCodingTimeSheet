@@ -407,7 +407,6 @@ export function AdminPortal({ adminEmail }: { adminEmail: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    let refreshId: ReturnType<typeof setInterval> | undefined;
 
     async function loadEntries(initialLoad: boolean) {
       if (initialLoad) {
@@ -442,15 +441,13 @@ export function AdminPortal({ adminEmail }: { adminEmail: string }) {
     }
 
     void loadEntries(true);
-    refreshId = setInterval(() => {
+    const refreshId = setInterval(() => {
       void loadEntries(false);
     }, REFRESH_INTERVAL_MS);
 
     return () => {
       cancelled = true;
-      if (refreshId !== undefined) {
-        clearInterval(refreshId);
-      }
+      clearInterval(refreshId);
     };
   }, []);
 
