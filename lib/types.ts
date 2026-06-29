@@ -23,9 +23,13 @@ export type TimesheetProblemInput = {
   turns: TimesheetTurnInput[];
 };
 
+export type TotalHoursMode = "calculated" | "override";
+
 export type TimesheetInput = {
+  clientSubmissionId: string | null;
   workforceEmail: string;
   workSessions: TimesheetWorkSessionInput[];
+  totalHoursMode: TotalHoursMode;
   totalHoursOverride: number | null;
   problems: TimesheetProblemInput[];
 };
@@ -34,7 +38,7 @@ export type TimesheetProblemRecord = TimesheetProblemInput & {
   id: string;
 };
 
-export type TimesheetRecord = Omit<TimesheetInput, "problems"> & {
+export type TimesheetRecord = Pick<TimesheetInput, "workforceEmail" | "workSessions" | "totalHoursOverride"> & {
   id: string;
   auth0Email: string | null;
   startAt: string;

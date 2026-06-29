@@ -6,6 +6,7 @@ import type { TimesheetInput, UserProfileInput } from "@/lib/types";
 
 const MAX_SUMMARY_WORDS = 100;
 const MIN_TURNS = 5;
+const TOTAL_HOURS_MODES = ["calculated", "override"] as const;
 
 export function countWords(value: string) {
   return value.trim().split(/\s+/).filter(Boolean).length;
@@ -30,6 +31,7 @@ const optionalWorkforceEmail = nullableTrimmedString.refine(
 
 export const timesheetInputSchema = z
   .object({
+    clientSubmissionId: z.string().uuid("Client submission ID must be a valid UUID.").nullable().optional(),
     workforceEmail: z
       .string()
       .trim()
@@ -55,6 +57,7 @@ export const timesheetInputSchema = z
         })
       )
       .min(1, "At least one work session is required."),
+    totalHoursMode: z.enum(TOTAL_HOURS_MODES).optional(),
     totalHoursOverride: z.number().finite().nonnegative().nullable(),
     problems: z
       .array(
@@ -94,6 +97,24 @@ export const timesheetInputSchema = z
       .min(1, "At least one problem is required.")
   })
   .superRefine((value, context) => {
+    const totalHoursMode = value.totalHoursMode ?? (value.totalHoursOverride === null ? "calculated" : "override");
+
+    if (totalHoursMode === "override" && value.totalHoursOverride === null) {
+      context.addIssue({
+        code: "custom",
+        path: ["totalHoursOverride"],
+        message: "Enter a total hours override or clear the override."
+      });
+    }
+
+    if (value.totalHoursMode === "calculated" && value.totalHoursOverride !== null) {
+      context.addIssue({
+        code: "custom",
+        path: ["totalHoursOverride"],
+        message: "Clear the hours override before using calculated hours."
+      });
+    }
+
     validateWorkSessions(value.workSessions, context);
 
     value.problems.forEach((problem, problemIndex) => {
@@ -107,10 +128,21 @@ export const timesheetInputSchema = z
         }
       });
     });
+  })
+  .transform((value) => {
+    const totalHoursMode = value.totalHoursMode ?? (value.totalHoursOverride === null ? "calculated" : "override");
+
+    return {
+      ...value,
+      clientSubmissionId: value.clientSubmissionId ?? null,
+      totalHoursMode,
+      totalHoursOverride: totalHoursMode === "calculated" ? null : value.totalHoursOverride
+    };
   });
 
 const legacyTimesheetInputSchema = z
   .object({
+    clientSubmissionId: z.string().uuid().nullable().optional(),
     workforceEmail: z.string(),
     primaryProgrammingLanguage: z.string(),
     secondaryProgrammingLanguages: nullableTrimmedString,
@@ -137,8 +169,10 @@ const legacyTimesheetInputSchema = z
     )
   })
   .transform((value) => ({
+    clientSubmissionId: value.clientSubmissionId ?? null,
     workforceEmail: value.workforceEmail,
     workSessions: value.workSessions,
+    totalHoursMode: value.totalHoursOverride === null ? "calculated" : "override",
     totalHoursOverride: value.totalHoursOverride,
     problems: [
       {

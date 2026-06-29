@@ -6,6 +6,7 @@ function dateTimeLocalToIso(value) {
 
 function payloadFor(suffix, workforceEmail, tokenUsage) {
   return {
+    clientSubmissionId: crypto.randomUUID(),
     workforceEmail,
     workSessions: [
       {
@@ -14,6 +15,7 @@ function payloadFor(suffix, workforceEmail, tokenUsage) {
         endAt: dateTimeLocalToIso("2026-06-16T10:00")
       }
     ],
+    totalHoursMode: "calculated",
     totalHoursOverride: null,
     problems: [
       {
@@ -122,34 +124,21 @@ assert(
   "Expected created entry to appear in history."
 );
 
-const updatedPayload = {
-  ...payload,
-  totalHoursOverride: 1.25,
-  problems: [
-    {
-      ...payload.problems[0],
-      summary: "Updated scripted end-to-end check for the timesheet API.",
-      tokenUsage: 9876,
-      turns: [...payload.problems[0].turns, { turnNumber: 6, taskType: "Code review" }]
-    },
-    {
-      ...payload.problems[0],
-      liveCompareProblemId: "LC-SCRIPT-001-B",
-      taskUrl: "https://taiga.example/tasks/LC-SCRIPT-001-B",
-      summary: "Second problem in the same scripted work session.",
-      tokenUsage: 1111
-    }
-  ]
-};
-
-const updated = await request(`/api/timesheets/${created.entry.id}`, {
+const editResponse = await fetch(`${baseUrl}/api/timesheets/${created.entry.id}`, {
   method: "PUT",
-  body: JSON.stringify(updatedPayload)
+  headers: {
+    "Content-Type": "application/json",
+    ...(cookieHeader ? { Cookie: cookieHeader } : {})
+  },
+  body: JSON.stringify({
+    ...payload,
+    totalHoursMode: "override",
+    totalHoursOverride: 1.25
+  })
 });
-assert(updated.entry.problems[0].tokenUsage === 9876, "Expected updated token usage.");
-assert(updated.entry.problems[0].turns.length === 6, "Expected updated sixth turn.");
-assert(updated.entry.problems.length === 2, "Expected second problem in same work session.");
-assert(updated.entry.reportedHours === 1.25, "Expected updated reported hours override.");
+const editBody = await editResponse.json();
+assert(editResponse.status === 409, `Expected submitted timesheets to be locked, got ${editResponse.status}.`);
+assert(editBody.error === "Submitted timesheets cannot be edited.", "Expected immutable submission error message.");
 
 await setDebugUser("script-user-two@labelbox.com", "Script User Two");
 const secondPayload = payloadFor("002", "ab12cd@alignerrworkforce.com", 2222);

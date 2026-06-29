@@ -17,9 +17,9 @@ No Labelbox variables are used.
 
 ## Supabase
 
-Apply `supabase/migrations/001_timesheets.sql` to the Supabase project before using the app.
+Apply every SQL file in `supabase/migrations/` to the Supabase project in filename order before using the app.
 
-The migration creates `timesheet_entries` and `timesheet_turns`, enables row-level security, and relies on the Next.js backend to authorize each request against the Auth0 user ID.
+The migrations create the timesheet, profile, multi-problem batch, and idempotent submission tables/columns, enable row-level security, and rely on the Next.js backend to authorize each request against the Auth0 user ID. The write API checks for the current required schema and returns a 503 if migrations are missing.
 
 ## Auth0
 

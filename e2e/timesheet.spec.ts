@@ -148,6 +148,27 @@ test("debug user can save, submit, and cannot edit a submitted timesheet", async
   await resetDebugData(page);
 });
 
+test("blank active hours override blocks timesheet submission", async ({ page }) => {
+  await resetDebugData(page);
+  await setDebugUser(page, firstUser.loginEmail, firstUser.name);
+
+  await page.goto("/");
+  await page.getByLabel("Google Workforce email").fill(firstUser.workforceEmail);
+  await page.getByLabel("Session 1 start time").fill("2026-06-16T09:00");
+  await page.getByLabel("Session 1 end time").fill("2026-06-16T10:15");
+  await expect(page.getByLabel("Total hours")).toHaveValue("1.25");
+
+  await page.getByLabel("Total hours").fill("");
+  await expect(page.getByText("Enter a total hours override or clear the override.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Submit timesheet" })).toBeDisabled();
+
+  await page.getByRole("button", { name: "Clear override" }).click();
+  await expect(page.getByText("Enter a total hours override or clear the override.")).toHaveCount(0);
+  await expect(page.getByLabel("Total hours")).toHaveValue("1.25");
+
+  await resetDebugData(page);
+});
+
 test("admin can view all timesheets and download CSV", async ({ page }) => {
   await resetDebugData(page);
 

@@ -35,6 +35,24 @@ describe("timesheet validation", () => {
     expect(validateTimesheetInput(validPayload).success).toBe(true);
   });
 
+  it("accepts a valid client submission ID", () => {
+    const result = validateTimesheetInput({
+      ...validPayload,
+      clientSubmissionId: "d8c84809-1d47-4b74-9fd8-9f78f0fe7892"
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects malformed client submission IDs", () => {
+    const result = validateTimesheetInput({
+      ...validPayload,
+      clientSubmissionId: "not-a-uuid"
+    });
+
+    expect(result.success).toBe(false);
+  });
+
   it("requires at least five turns", () => {
     const result = validateTimesheetInput({
       ...validPayload,
@@ -116,15 +134,37 @@ describe("timesheet validation", () => {
   it("accepts a nonnegative hours override", () => {
     const result = validateTimesheetInput({
       ...validPayload,
+      totalHoursMode: "override",
       totalHoursOverride: 1.5
     });
 
     expect(result.success).toBe(true);
   });
 
+  it("rejects override mode without an hours override", () => {
+    const result = validateTimesheetInput({
+      ...validPayload,
+      totalHoursMode: "override",
+      totalHoursOverride: null
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects explicit calculated mode with an hours override", () => {
+    const result = validateTimesheetInput({
+      ...validPayload,
+      totalHoursMode: "calculated",
+      totalHoursOverride: 1.5
+    });
+
+    expect(result.success).toBe(false);
+  });
+
   it("rejects negative hours overrides", () => {
     const result = validateTimesheetInput({
       ...validPayload,
+      totalHoursMode: "override",
       totalHoursOverride: -1
     });
 
