@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /Applications/Cursor.app/Contents/Resources/app/resources/helpers/node "$(dirname "$0")/extract/package/bin/npm-cli.js" "$@"

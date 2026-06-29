@@ -79,6 +79,19 @@ function formatTokenTick(value: number) {
   return String(value);
 }
 
+function formatWeekRange(startValue: string, endValue: string) {
+  const start = new Date(startValue);
+  const end = new Date(endValue);
+
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) {
+    return "Invalid week";
+  }
+
+  const formatter = new Intl.DateTimeFormat([], { month: "short", day: "numeric", timeZone: "UTC" });
+
+  return `${formatter.format(start)}-${formatter.format(end)}`;
+}
+
 function formatLastUpdated(value: Date | null) {
   if (value === null) {
     return "Not refreshed yet";
@@ -179,6 +192,95 @@ function DeltaBarChart({ rows }: { rows: CategoryAnalyticsRow[] }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function ThroughputHistogramChart({ analytics }: { analytics: AdminAnalytics["weeklyThroughput"] }) {
+  const width = 640;
+  const height = 300;
+  const padding = { top: 28, right: 26, bottom: 52, left: 54 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const highestValue = Math.max(analytics.target, ...analytics.bins.map((bin) => bin.count), 1);
+  const yMax = Math.max(1, Math.ceil((highestValue * 1.12) / 50) * 50);
+  const xAxisY = height - padding.bottom;
+  const tickValues = Array.from(new Set([0, analytics.target, yMax])).sort((a, b) => a - b);
+
+  function yPosition(value: number) {
+    return padding.top + (1 - value / yMax) * plotHeight;
+  }
+
+  if (analytics.bins.length === 0) {
+    return <div className="rounded-lg bg-stone-50 p-6 text-sm text-stone-600">No completed timesheets for this chart yet.</div>;
+  }
+
+  const slotWidth = plotWidth / analytics.bins.length;
+  const barWidth = Math.min(72, slotWidth * 0.58);
+  const windowDescription =
+    analytics.totalWeeks > analytics.windowSize
+      ? `Showing latest ${analytics.bins.length} of ${analytics.totalWeeks} weeks.`
+      : `Showing ${analytics.bins.length} week${analytics.bins.length === 1 ? "" : "s"}.`;
+
+  return (
+    <div>
+      <svg
+        aria-label="Weekly submitted timesheet throughput trend"
+        className="h-auto w-full overflow-visible"
+        role="img"
+        viewBox={`0 0 ${width} ${height}`}
+      >
+        {tickValues.map((tick) => {
+          const y = yPosition(tick);
+
+          return (
+            <g key={tick}>
+              <line stroke={GRID_LINE} x1={padding.left} x2={width - padding.right} y1={y} y2={y} />
+              <text fill="#6b7280" fontSize="11" textAnchor="end" x={padding.left - 8} y={y + 4}>
+                {formatInteger(tick)}
+              </text>
+            </g>
+          );
+        })}
+        <line
+          stroke={CHART_RED}
+          strokeDasharray="6 5"
+          strokeWidth="2"
+          x1={padding.left}
+          x2={width - padding.right}
+          y1={yPosition(analytics.target)}
+          y2={yPosition(analytics.target)}
+        />
+        <text fill={CHART_RED} fontSize="12" fontWeight="600" textAnchor="end" x={width - padding.right} y={yPosition(analytics.target) - 8}>
+          {formatInteger(analytics.target)} target
+        </text>
+        <line stroke={INK} x1={padding.left} x2={padding.left} y1={padding.top} y2={xAxisY} />
+        <line stroke={INK} x1={padding.left} x2={width - padding.right} y1={xAxisY} y2={xAxisY} />
+        {analytics.bins.map((bin, index) => {
+          const x = padding.left + slotWidth * index + (slotWidth - barWidth) / 2;
+          const y = yPosition(bin.count);
+          const barHeight = Math.max(0, xAxisY - y);
+
+          return (
+            <g key={bin.weekStart}>
+              <rect fill={CHART_BLUE} height={barHeight} rx="5" width={barWidth} x={x} y={xAxisY - barHeight}>
+                <title>
+                  {formatWeekRange(bin.weekStart, bin.weekEnd)}: {formatInteger(bin.count)} submitted timesheets
+                </title>
+              </rect>
+              <text fill={INK} fontSize="12" fontWeight="600" textAnchor="middle" x={x + barWidth / 2} y={Math.max(padding.top + 12, y - 8)}>
+                {formatInteger(bin.count)}
+              </text>
+              <text fill="#6b7280" fontSize="11" textAnchor="middle" x={x + barWidth / 2} y={height - padding.bottom + 20}>
+                {bin.label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+      <p className="mt-3 rounded-lg border border-stone-200 bg-stone-50 p-3 text-xs leading-5 text-stone-600">
+        {windowDescription} Counted by each timesheet&apos;s completion week; gaps are shown as zero-throughput weeks.
+      </p>
     </div>
   );
 }
@@ -342,6 +444,13 @@ function AnalyticsDashboard({ analytics }: { analytics: AdminAnalytics }) {
         hrs; token cutoff: {formatTokens(filter.tokenUsageMax)}. Reason counts: {formatInteger(filter.excludedForHours)} hour outliers,{" "}
         {formatInteger(filter.excludedForTokens)} token outliers.
       </p>
+
+      <ChartCard
+        description="Submitted timesheets completed per UTC week. Shows a moving window of the latest five weeks with the 500/week target line."
+        title="Weekly Throughput Trend"
+      >
+        <ThroughputHistogramChart analytics={analytics.weeklyThroughput} />
+      </ChartCard>
 
       <div className="grid gap-6 xl:grid-cols-2">
         <ChartCard

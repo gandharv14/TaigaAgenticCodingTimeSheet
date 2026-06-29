@@ -1,6 +1,10 @@
 import { TASK_TYPES, type TaskType } from "@/lib/task-types";
 import type { AdminTimesheetRecord } from "@/lib/types";
 
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const WEEKLY_THROUGHPUT_WINDOW_SIZE = 5;
+export const WEEKLY_THROUGHPUT_TARGET = 500;
+
 export const IDEAL_CATEGORY_SHARE = {
   Debugging: 15,
   "Root Cause Analysis": 10,
@@ -84,6 +88,22 @@ export type TokenUsageAnalytics = {
   hoursScatter: TokenScatterAnalytics;
 };
 
+export type WeeklyThroughputBin = {
+  label: string;
+  weekStart: string;
+  weekEnd: string;
+  count: number;
+};
+
+export type WeeklyThroughputAnalytics = {
+  bins: WeeklyThroughputBin[];
+  target: number;
+  windowSize: number;
+  totalWeeks: number;
+  firstWeekStart: string | null;
+  lastWeekStart: string | null;
+};
+
 export type OutlierFilterAnalytics = {
   totalRows: number;
   includedRows: number;
@@ -103,6 +123,7 @@ export type AdminAnalytics = {
   categoryRows: CategoryAnalyticsRow[];
   categoryRowsByCount: CategoryAnalyticsRow[];
   tokenUsage: TokenUsageAnalytics;
+  weeklyThroughput: WeeklyThroughputAnalytics;
 };
 
 type FilteredEntries = {
@@ -147,6 +168,25 @@ function average(values: number[]) {
 
 function finiteValues(values: number[]) {
   return values.filter((value) => Number.isFinite(value));
+}
+
+function validDate(value: string) {
+  const date = new Date(value);
+
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function startOfUtcWeek(date: Date) {
+  const weekStart = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const daysSinceMonday = (weekStart.getUTCDay() + 6) % 7;
+  weekStart.setUTCDate(weekStart.getUTCDate() - daysSinceMonday);
+  weekStart.setUTCHours(0, 0, 0, 0);
+
+  return weekStart;
+}
+
+function formatWeekLabel(weekStart: Date) {
+  return weekStart.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
 function highOutlierCutoff(values: number[], multiplier: number) {
@@ -279,6 +319,60 @@ function summarizeTokenUsage(entries: AdminTimesheetRecord[]): TokenUsageAnalyti
   };
 }
 
+function summarizeWeeklyThroughput(entries: AdminTimesheetRecord[]): WeeklyThroughputAnalytics {
+  const counts = new Map<number, number>();
+  let firstWeekStartMs: number | null = null;
+  let lastWeekStartMs: number | null = null;
+
+  for (const entry of entries) {
+    const date = validDate(entry.endAt) ?? validDate(entry.createdAt) ?? validDate(entry.startAt);
+
+    if (date === null) {
+      continue;
+    }
+
+    const weekStartMs = startOfUtcWeek(date).getTime();
+    counts.set(weekStartMs, (counts.get(weekStartMs) ?? 0) + 1);
+    firstWeekStartMs = firstWeekStartMs === null ? weekStartMs : Math.min(firstWeekStartMs, weekStartMs);
+    lastWeekStartMs = lastWeekStartMs === null ? weekStartMs : Math.max(lastWeekStartMs, weekStartMs);
+  }
+
+  if (firstWeekStartMs === null || lastWeekStartMs === null) {
+    return {
+      bins: [],
+      target: WEEKLY_THROUGHPUT_TARGET,
+      windowSize: WEEKLY_THROUGHPUT_WINDOW_SIZE,
+      totalWeeks: 0,
+      firstWeekStart: null,
+      lastWeekStart: null
+    };
+  }
+
+  const windowStartMs = Math.max(firstWeekStartMs, lastWeekStartMs - (WEEKLY_THROUGHPUT_WINDOW_SIZE - 1) * WEEK_MS);
+  const bins: WeeklyThroughputBin[] = [];
+
+  for (let weekStartMs = windowStartMs; weekStartMs <= lastWeekStartMs; weekStartMs += WEEK_MS) {
+    const weekStart = new Date(weekStartMs);
+    const weekEnd = new Date(weekStartMs + WEEK_MS - 1);
+
+    bins.push({
+      label: formatWeekLabel(weekStart),
+      weekStart: weekStart.toISOString(),
+      weekEnd: weekEnd.toISOString(),
+      count: counts.get(weekStartMs) ?? 0
+    });
+  }
+
+  return {
+    bins,
+    target: WEEKLY_THROUGHPUT_TARGET,
+    windowSize: WEEKLY_THROUGHPUT_WINDOW_SIZE,
+    totalWeeks: Math.floor((lastWeekStartMs - firstWeekStartMs) / WEEK_MS) + 1,
+    firstWeekStart: new Date(firstWeekStartMs).toISOString(),
+    lastWeekStart: new Date(lastWeekStartMs).toISOString()
+  };
+}
+
 function filterOutlierEntries(entries: AdminTimesheetRecord[]): FilteredEntries {
   const reportedHoursValues = finiteValues(entries.map((entry) => entry.reportedHours).filter((value) => value > 0));
   const tokenUsageValues = tokenValues(entries);
@@ -351,6 +445,7 @@ export function summarizeAdminAnalytics(entries: AdminTimesheetRecord[]): AdminA
     outlierFilter: metadata,
     categoryRows,
     categoryRowsByCount: [...categoryRows].sort((a, b) => b.count - a.count || TASK_TYPES.indexOf(a.category) - TASK_TYPES.indexOf(b.category)),
-    tokenUsage: summarizeTokenUsage(includedEntries)
+    tokenUsage: summarizeTokenUsage(includedEntries),
+    weeklyThroughput: summarizeWeeklyThroughput(entries)
   };
 }

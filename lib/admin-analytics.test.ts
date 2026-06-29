@@ -7,8 +7,11 @@ import type { AdminTimesheetRecord } from "@/lib/types";
 function record(
   id: string,
   turns: TaskType[],
-  overrides: Partial<Pick<AdminTimesheetRecord, "reportedHours" | "tokenUsage">> = {}
+  overrides: Partial<Pick<AdminTimesheetRecord, "createdAt" | "endAt" | "reportedHours" | "startAt" | "tokenUsage">> = {}
 ): AdminTimesheetRecord {
+  const startAt = overrides.startAt ?? "2026-06-16T16:00:00.000Z";
+  const endAt = overrides.endAt ?? "2026-06-16T17:00:00.000Z";
+
   return {
     id,
     auth0UserId: `auth0|${id}`,
@@ -18,13 +21,13 @@ function record(
     secondaryProgrammingLanguages: null,
     liveCompareProblemId: `LC-${id.toUpperCase()}`,
     taskUrl: `https://taiga.example/tasks/${id}`,
-    startAt: "2026-06-16T16:00:00.000Z",
-    endAt: "2026-06-16T17:00:00.000Z",
+    startAt,
+    endAt,
     workSessions: [
       {
         sessionNumber: 1,
-        startAt: "2026-06-16T16:00:00.000Z",
-        endAt: "2026-06-16T17:00:00.000Z"
+        startAt,
+        endAt
       }
     ],
     calculatedHours: overrides.reportedHours ?? 1,
@@ -38,7 +41,7 @@ function record(
       turnNumber: index + 1,
       taskType
     })),
-    createdAt: "2026-06-16T18:00:00.000Z",
+    createdAt: overrides.createdAt ?? "2026-06-16T18:00:00.000Z",
     updatedAt: "2026-06-16T18:00:00.000Z"
   };
 }
@@ -137,6 +140,37 @@ describe("summarizeAdminAnalytics", () => {
     expect(analytics.tokenUsage.hoursScatter.correlation).toBeGreaterThan(0);
   });
 
+  it("builds a five-week moving throughput window with zero-filled gaps", () => {
+    const analytics = summarizeAdminAnalytics([
+      record("week-one", ["Debugging"], { endAt: "2026-05-04T12:00:00.000Z" }),
+      record("week-two-a", ["Debugging"], { endAt: "2026-05-11T12:00:00.000Z" }),
+      record("week-two-b", ["Testing"], { endAt: "2026-05-12T12:00:00.000Z" }),
+      record("week-four", ["Code writing"], { endAt: "2026-05-25T12:00:00.000Z" }),
+      record("week-five-a", ["Code writing"], { endAt: "2026-06-01T12:00:00.000Z" }),
+      record("week-five-b", ["Code writing"], { endAt: "2026-06-02T12:00:00.000Z" }),
+      record("week-five-c", ["Code writing"], { endAt: "2026-06-03T12:00:00.000Z" }),
+      record("week-six-a", ["Communication"], { endAt: "2026-06-08T12:00:00.000Z" }),
+      record("week-six-b", ["Communication"], { endAt: "2026-06-09T12:00:00.000Z" })
+    ]);
+
+    expect(analytics.weeklyThroughput).toMatchObject({
+      target: 500,
+      windowSize: 5,
+      totalWeeks: 6,
+      firstWeekStart: "2026-05-04T00:00:00.000Z",
+      lastWeekStart: "2026-06-08T00:00:00.000Z"
+    });
+    expect(analytics.weeklyThroughput.bins).toHaveLength(5);
+    expect(analytics.weeklyThroughput.bins.map((bin) => bin.weekStart)).toEqual([
+      "2026-05-11T00:00:00.000Z",
+      "2026-05-18T00:00:00.000Z",
+      "2026-05-25T00:00:00.000Z",
+      "2026-06-01T00:00:00.000Z",
+      "2026-06-08T00:00:00.000Z"
+    ]);
+    expect(analytics.weeklyThroughput.bins.map((bin) => bin.count)).toEqual([2, 0, 1, 3, 2]);
+  });
+
   it("handles empty data without NaN values", () => {
     const analytics = summarizeAdminAnalytics([]);
 
@@ -160,5 +194,6 @@ describe("summarizeAdminAnalytics", () => {
     expect(analytics.tokenUsage.blankRows).toBe(0);
     expect(analytics.tokenUsage.mean).toBeNull();
     expect(analytics.tokenUsage.turnsScatter.correlation).toBeNull();
+    expect(analytics.weeklyThroughput.bins).toEqual([]);
   });
 });
