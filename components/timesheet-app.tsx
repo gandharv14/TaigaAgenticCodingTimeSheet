@@ -41,6 +41,7 @@ type FormProblem = {
 };
 
 type FormState = {
+  clientSubmissionId: string;
   workforceEmail: string;
   workSessions: FormWorkSession[];
   totalHours: string;
@@ -66,6 +67,15 @@ const WORKFORCE_EMAIL_PLACEHOLDER = "Kx9m**@alignerrworkforce.com";
 const DRAFT_STORAGE_VERSION = 1;
 const DRAFT_STORAGE_PREFIX = "taiga-timesheet-draft";
 
+function newClientSubmissionId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  const randomHex = () => Math.floor(Math.random() * 0xffff).toString(16).padStart(4, "0");
+  return `${randomHex()}${randomHex()}-${randomHex()}-4${randomHex().slice(1)}-8${randomHex().slice(1)}-${randomHex()}${randomHex()}${randomHex()}`;
+}
+
 function emptyProblem(): FormProblem {
   return {
     primaryProgrammingLanguage: "",
@@ -82,6 +92,7 @@ function emptyProblem(): FormProblem {
 
 function emptyForm(): FormState {
   return {
+    clientSubmissionId: newClientSubmissionId(),
     workforceEmail: "",
     workSessions: [{ startAt: "", endAt: "" }],
     totalHours: "",
@@ -124,12 +135,14 @@ function parseOptionalHours(value: string) {
 
 function toPayload(form: FormState): TimesheetInput {
   return {
+    clientSubmissionId: form.clientSubmissionId,
     workforceEmail: form.workforceEmail,
     workSessions: form.workSessions.map((session, index) => ({
       sessionNumber: index + 1,
       startAt: dateTimeLocalToIso(session.startAt),
       endAt: dateTimeLocalToIso(session.endAt)
     })),
+    totalHoursMode: form.usesHoursOverride ? "override" : "calculated",
     totalHoursOverride: form.usesHoursOverride ? parseOptionalHours(form.totalHours) : null,
     problems: form.problems.map((problem) => ({
       primaryProgrammingLanguage: problem.primaryProgrammingLanguage,
@@ -213,6 +226,10 @@ function normalizeDraftForm(value: unknown): FormState | null {
     : [];
 
   return {
+    clientSubmissionId:
+      typeof candidate.clientSubmissionId === "string" && candidate.clientSubmissionId.trim().length > 0
+        ? candidate.clientSubmissionId
+        : newClientSubmissionId(),
     workforceEmail: normalizeString(candidate.workforceEmail),
     workSessions: workSessions.length > 0 ? workSessions : [{ startAt: "", endAt: "" }],
     totalHours: normalizeString(candidate.totalHours),
@@ -282,6 +299,10 @@ export function TimesheetApp({
   );
   const totalHoursInput = form.usesHoursOverride ? form.totalHours : hoursInputValue(calculatedHours);
   const submittedHours = form.usesHoursOverride ? parseOptionalHours(form.totalHours) : calculatedHours;
+  const hoursOverrideError =
+    form.usesHoursOverride && parseOptionalHours(form.totalHours) === null
+      ? "Enter a total hours override or clear the override."
+      : null;
 
   useEffect(() => {
     try {
@@ -602,12 +623,30 @@ export function TimesheetApp({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (hoursOverrideError) {
+      setNotice({
+        tone: "error",
+        message: hoursOverrideError
+      });
+      return;
+    }
+
     setSubmitAcknowledged(false);
     setSubmitConfirmOpen(true);
   }
 
   async function confirmSubmit() {
     if (!submitAcknowledged) {
+      return;
+    }
+
+    if (hoursOverrideError) {
+      setNotice({
+        tone: "error",
+        message: hoursOverrideError
+      });
+      setSubmitConfirmOpen(false);
       return;
     }
 
@@ -814,6 +853,8 @@ export function TimesheetApp({
                 <label className="block">
                   <span className="text-sm font-medium text-stone-700">Total hours</span>
                   <input
+                    aria-describedby={hoursOverrideError ? "total-hours-error" : undefined}
+                    aria-invalid={Boolean(hoursOverrideError)}
                     className="mt-1 h-11 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
                     min={0}
                     onChange={(event) => updateTotalHours(event.target.value)}
@@ -826,6 +867,11 @@ export function TimesheetApp({
                       ? `Override active. Auto-calculated value is ${formatHours(calculatedHours)} hours.`
                       : "Auto-calculated from work sessions. Edit this field to override."}
                   </span>
+                  {hoursOverrideError ? (
+                    <span className="mt-1 block text-xs font-medium text-red-700" id="total-hours-error">
+                      {hoursOverrideError}
+                    </span>
+                  ) : null}
                 </label>
                 <div className="flex flex-col gap-2 sm:flex-row md:flex-col">
                   <span className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-900">
@@ -1073,7 +1119,7 @@ export function TimesheetApp({
               </button>
               <button
                 className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-fern px-4 text-sm font-medium text-white transition hover:bg-[#285f51] focus:outline-none focus:ring-2 focus:ring-fern focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-stone-400"
-                disabled={saving || overSummaryLimit}
+                disabled={saving || overSummaryLimit || Boolean(hoursOverrideError)}
                 type="submit"
               >
                 {saving ? (

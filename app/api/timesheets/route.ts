@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentUser } from "@/lib/auth0";
-import { createTimesheet, listTimesheetsForUser } from "@/lib/timesheets";
+import { createTimesheet, listTimesheetsForUser, TimesheetSchemaError } from "@/lib/timesheets";
 import { validateTimesheetInput, validationMessages } from "@/lib/validation";
 
 export const runtime = "nodejs";
@@ -46,6 +46,13 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ entry }, { status: 201 });
   } catch (error) {
+    if (error instanceof TimesheetSchemaError) {
+      return NextResponse.json(
+        { error: "Timesheet database schema is out of date. Apply all Supabase migrations before submitting." },
+        { status: 503 }
+      );
+    }
+
     console.error(error);
     return NextResponse.json({ error: "Unable to save timesheet." }, { status: 500 });
   }
