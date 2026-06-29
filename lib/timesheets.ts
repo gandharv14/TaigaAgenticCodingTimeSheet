@@ -39,6 +39,18 @@ type EntryRow = {
   timesheet_turns?: TurnRow[];
 };
 
+type LegacyEntryRow = EntryRow & {
+  auth0_user_id?: string;
+  auth0_email: string | null;
+  workforce_email: string;
+  start_at: string;
+  end_at: string;
+  total_hours_override?: number | string | null;
+  created_at: string;
+  updated_at: string;
+  timesheet_work_sessions?: WorkSessionRow[];
+};
+
 type TurnRow = {
   turn_number: number;
   task_type: TaskType;
@@ -65,6 +77,10 @@ const USER_SELECT =
   "id, auth0_email, workforce_email, start_at, end_at, total_hours_override, created_at, updated_at, timesheet_batch_work_sessions(session_number, start_at, end_at), timesheet_entries(id, primary_programming_language, secondary_programming_languages, live_compare_problem_id, task_url, summary, comments, token_usage, blocked_on_taiga_bug, timesheet_turns(turn_number, task_type))";
 const ADMIN_SELECT =
   "id, auth0_user_id, auth0_email, workforce_email, start_at, end_at, total_hours_override, created_at, updated_at, timesheet_batch_work_sessions(session_number, start_at, end_at), timesheet_entries(id, primary_programming_language, secondary_programming_languages, live_compare_problem_id, task_url, summary, comments, token_usage, blocked_on_taiga_bug, timesheet_turns(turn_number, task_type))";
+const USER_LEGACY_SELECT =
+  "id, auth0_email, workforce_email, primary_programming_language, secondary_programming_languages, live_compare_problem_id, task_url, start_at, end_at, total_hours_override, summary, comments, token_usage, blocked_on_taiga_bug, created_at, updated_at, timesheet_turns(turn_number, task_type), timesheet_work_sessions(session_number, start_at, end_at)";
+const ADMIN_LEGACY_SELECT =
+  "id, auth0_user_id, auth0_email, workforce_email, primary_programming_language, secondary_programming_languages, live_compare_problem_id, task_url, start_at, end_at, total_hours_override, summary, comments, token_usage, blocked_on_taiga_bug, created_at, updated_at, timesheet_turns(turn_number, task_type), timesheet_work_sessions(session_number, start_at, end_at)";
 
 function nullableNumber(value: number | string | null | undefined) {
   if (value === null || value === undefined) {
@@ -73,6 +89,25 @@ function nullableNumber(value: number | string | null | undefined) {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isMissingMultiProblemSchemaError(error: unknown) {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+
+  const { code, message } = error as { code?: unknown; message?: unknown };
+  const normalizedCode = typeof code === "string" ? code : "";
+  const normalizedMessage = typeof message === "string" ? message.toLowerCase() : "";
+
+  return (
+    ["42P01", "42703", "PGRST200", "PGRST204", "PGRST205"].includes(normalizedCode) ||
+    normalizedMessage.includes("timesheet_work_batches") ||
+    normalizedMessage.includes("timesheet_batch_work_sessions") ||
+    normalizedMessage.includes("work_batch_id") ||
+    normalizedMessage.includes("schema cache") ||
+    normalizedMessage.includes("relationship")
+  );
 }
 
 function normalizedInputSessions(input: TimesheetInput) {
@@ -85,6 +120,28 @@ function normalizedInputSessions(input: TimesheetInput) {
 
 function workSessionsFromRow(row: BatchRow) {
   const sessions = [...(row.timesheet_batch_work_sessions ?? [])]
+    .sort((a, b) => a.session_number - b.session_number)
+    .map((session) => ({
+      sessionNumber: session.session_number,
+      startAt: session.start_at,
+      endAt: session.end_at
+    }));
+
+  if (sessions.length > 0) {
+    return sessions;
+  }
+
+  return [
+    {
+      sessionNumber: 1,
+      startAt: row.start_at,
+      endAt: row.end_at
+    }
+  ];
+}
+
+function workSessionsFromLegacyRow(row: LegacyEntryRow) {
+  const sessions = [...(row.timesheet_work_sessions ?? [])]
     .sort((a, b) => a.session_number - b.session_number)
     .map((session) => ({
       sessionNumber: session.session_number,
@@ -125,6 +182,26 @@ function problemsFromRow(row: BatchRow): TimesheetProblemRecord[] {
           taskType: turn.task_type
         }))
     }));
+}
+
+function problemFromLegacyRow(row: LegacyEntryRow): TimesheetProblemRecord {
+  return {
+    id: row.id,
+    primaryProgrammingLanguage: row.primary_programming_language ?? "Not specified",
+    secondaryProgrammingLanguages: row.secondary_programming_languages ?? null,
+    liveCompareProblemId: row.live_compare_problem_id,
+    taskUrl: row.task_url,
+    summary: row.summary,
+    comments: row.comments,
+    tokenUsage: row.token_usage,
+    blockedOnTaigaBug: row.blocked_on_taiga_bug,
+    turns: [...(row.timesheet_turns ?? [])]
+      .sort((a, b) => a.turn_number - b.turn_number)
+      .map((turn) => ({
+        turnNumber: turn.turn_number,
+        taskType: turn.task_type
+      }))
+  };
 }
 
 function toPublicDebugRecord(record: DebugRecord): TimesheetRecord {
@@ -178,6 +255,35 @@ function toRecord(row: BatchRow): TimesheetRecord {
 function toAdminRecord(row: BatchRow): AdminTimesheetRecord {
   return {
     ...toRecord(row),
+    auth0UserId: row.auth0_user_id ?? ""
+  };
+}
+
+function toLegacyRecord(row: LegacyEntryRow): TimesheetRecord {
+  const workSessions = workSessionsFromLegacyRow(row);
+  const calculatedHours = calculateWorkSessionHours(workSessions);
+  const totalHoursOverride = nullableNumber(row.total_hours_override);
+
+  return {
+    id: row.id,
+    auth0Email: row.auth0_email,
+    workforceEmail: row.workforce_email,
+    workSessions,
+    totalHoursOverride,
+    startAt: row.start_at,
+    endAt: row.end_at,
+    calculatedHours,
+    reportedHours: reportedHours(calculatedHours, totalHoursOverride),
+    problemCount: 1,
+    problems: [problemFromLegacyRow(row)],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function toLegacyAdminRecord(row: LegacyEntryRow): AdminTimesheetRecord {
+  return {
+    ...toLegacyRecord(row),
     auth0UserId: row.auth0_user_id ?? ""
   };
 }
@@ -314,6 +420,20 @@ export async function listTimesheetsForUser(auth0UserId: string) {
     .order("created_at", { ascending: false });
 
   if (error) {
+    if (isMissingMultiProblemSchemaError(error)) {
+      const { data: legacyData, error: legacyError } = await supabase
+        .from("timesheet_entries")
+        .select(USER_LEGACY_SELECT)
+        .eq("auth0_user_id", auth0UserId)
+        .order("created_at", { ascending: false });
+
+      if (legacyError) {
+        throw legacyError;
+      }
+
+      return (legacyData as LegacyEntryRow[]).map(toLegacyRecord);
+    }
+
     throw error;
   }
 
@@ -338,6 +458,31 @@ export async function listAllTimesheets() {
       .range(from, from + ADMIN_PAGE_SIZE - 1);
 
     if (error) {
+      if (isMissingMultiProblemSchemaError(error)) {
+        const legacyRows: LegacyEntryRow[] = [];
+
+        for (let legacyFrom = 0; ; legacyFrom += ADMIN_PAGE_SIZE) {
+          const { data: legacyData, error: legacyError } = await supabase
+            .from("timesheet_entries")
+            .select(ADMIN_LEGACY_SELECT)
+            .order("created_at", { ascending: false })
+            .range(legacyFrom, legacyFrom + ADMIN_PAGE_SIZE - 1);
+
+          if (legacyError) {
+            throw legacyError;
+          }
+
+          const legacyPage = (legacyData as LegacyEntryRow[]) ?? [];
+          legacyRows.push(...legacyPage);
+
+          if (legacyPage.length < ADMIN_PAGE_SIZE) {
+            break;
+          }
+        }
+
+        return legacyRows.map(toLegacyAdminRecord);
+      }
+
       throw error;
     }
 
