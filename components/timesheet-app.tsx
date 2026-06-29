@@ -11,7 +11,6 @@ import {
   RotateCcw,
   Save,
   ShieldCheck,
-  SquarePen,
   Trash2,
   UserRound
 } from "lucide-react";
@@ -64,6 +63,8 @@ type Notice = {
 const DEFAULT_TASK_TYPE: TaskType = "Debugging";
 const MIN_TURNS = 5;
 const WORKFORCE_EMAIL_PLACEHOLDER = "Kx9m**@alignerrworkforce.com";
+const DRAFT_STORAGE_VERSION = 1;
+const DRAFT_STORAGE_PREFIX = "taiga-timesheet-draft";
 
 function emptyProblem(): FormProblem {
   return {
@@ -87,21 +88,6 @@ function emptyForm(): FormState {
     usesHoursOverride: false,
     problems: [emptyProblem()]
   };
-}
-
-function dateTimeLocalValue(value: string) {
-  if (!value) {
-    return "";
-  }
-
-  const date = new Date(value);
-
-  if (!Number.isFinite(date.getTime())) {
-    return value;
-  }
-
-  const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return offsetDate.toISOString().slice(0, 16);
 }
 
 function hoursInputValue(value: number) {
@@ -163,33 +149,6 @@ function toPayload(form: FormState): TimesheetInput {
   };
 }
 
-function problemFromRecord(record: TimesheetRecord["problems"][number]): FormProblem {
-  return {
-    primaryProgrammingLanguage: record.primaryProgrammingLanguage,
-    secondaryProgrammingLanguages: record.secondaryProgrammingLanguages ?? "",
-    liveCompareProblemId: record.liveCompareProblemId,
-    taskUrl: record.taskUrl,
-    summary: record.summary,
-    comments: record.comments ?? "",
-    tokenUsage: record.tokenUsage === null ? "" : String(record.tokenUsage),
-    blockedOnTaigaBug: record.blockedOnTaigaBug,
-    turns: record.turns.map((turn) => turn.taskType)
-  };
-}
-
-function formFromRecord(record: TimesheetRecord): FormState {
-  return {
-    workforceEmail: record.workforceEmail,
-    workSessions: record.workSessions.map((session) => ({
-      startAt: dateTimeLocalValue(session.startAt),
-      endAt: dateTimeLocalValue(session.endAt)
-    })),
-    totalHours: record.totalHoursOverride === null ? "" : String(record.totalHoursOverride),
-    usesHoursOverride: record.totalHoursOverride !== null,
-    problems: record.problems.length > 0 ? record.problems.map(problemFromRecord) : [emptyProblem()]
-  };
-}
-
 function emptyProfile(userName: string): ProfileState {
   return {
     name: userName,
@@ -205,6 +164,60 @@ function profileFromRecord(profile: UserProfileRecord): ProfileState {
     workforceEmail: profile.workforceEmail ?? "",
     discordId: profile.discordId ?? "",
     hubstaffEmail: profile.hubstaffEmail ?? ""
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function normalizeString(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function normalizeDraftForm(value: unknown): FormState | null {
+  const candidate = isRecord(value) && isRecord(value.form) ? value.form : value;
+
+  if (!isRecord(candidate)) {
+    return null;
+  }
+
+  const workSessions = Array.isArray(candidate.workSessions)
+    ? candidate.workSessions
+        .filter(isRecord)
+        .map((session) => ({
+          startAt: normalizeString(session.startAt),
+          endAt: normalizeString(session.endAt)
+        }))
+    : [];
+
+  const problems = Array.isArray(candidate.problems)
+    ? candidate.problems.filter(isRecord).map((problem) => {
+        const turns = Array.isArray(problem.turns)
+          ? problem.turns
+              .filter((turn): turn is TaskType => typeof turn === "string" && TASK_TYPES.includes(turn as TaskType))
+          : [];
+
+        return {
+          primaryProgrammingLanguage: normalizeString(problem.primaryProgrammingLanguage),
+          secondaryProgrammingLanguages: normalizeString(problem.secondaryProgrammingLanguages),
+          liveCompareProblemId: normalizeString(problem.liveCompareProblemId),
+          taskUrl: normalizeString(problem.taskUrl),
+          summary: normalizeString(problem.summary),
+          comments: normalizeString(problem.comments),
+          tokenUsage: normalizeString(problem.tokenUsage),
+          blockedOnTaigaBug: typeof problem.blockedOnTaigaBug === "boolean" ? problem.blockedOnTaigaBug : false,
+          turns: turns.length > 0 ? turns : Array.from({ length: MIN_TURNS }, () => DEFAULT_TASK_TYPE)
+        };
+      })
+    : [];
+
+  return {
+    workforceEmail: normalizeString(candidate.workforceEmail),
+    workSessions: workSessions.length > 0 ? workSessions : [{ startAt: "", endAt: "" }],
+    totalHours: normalizeString(candidate.totalHours),
+    usesHoursOverride: typeof candidate.usesHoursOverride === "boolean" ? candidate.usesHoursOverride : false,
+    problems: problems.length > 0 ? problems : [emptyProblem()]
   };
 }
 
@@ -248,13 +261,18 @@ export function TimesheetApp({
   const [form, setForm] = useState<FormState>(() => emptyForm());
   const [entries, setEntries] = useState<TimesheetRecord[]>([]);
   const [profile, setProfile] = useState<ProfileState>(() => emptyProfile(userName));
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [submitConfirmOpen, setSubmitConfirmOpen] = useState(false);
+  const [submitAcknowledged, setSubmitAcknowledged] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [profileNotice, setProfileNotice] = useState<Notice | null>(null);
+  const draftStorageKey = useMemo(
+    () => `${DRAFT_STORAGE_PREFIX}:${loginEmail || "anonymous"}`,
+    [loginEmail]
+  );
 
   const problemWordCounts = useMemo(() => form.problems.map((problem) => countWords(problem.summary)), [form.problems]);
   const overSummaryLimit = problemWordCounts.some((words) => words > 100);
@@ -264,6 +282,37 @@ export function TimesheetApp({
   );
   const totalHoursInput = form.usesHoursOverride ? form.totalHours : hoursInputValue(calculatedHours);
   const submittedHours = form.usesHoursOverride ? parseOptionalHours(form.totalHours) : calculatedHours;
+
+  useEffect(() => {
+    try {
+      const savedDraft = window.localStorage.getItem(draftStorageKey);
+
+      if (!savedDraft) {
+        return;
+      }
+
+      const restoredForm = normalizeDraftForm(JSON.parse(savedDraft));
+
+      if (!restoredForm) {
+        window.localStorage.removeItem(draftStorageKey);
+        return;
+      }
+
+      const restoreTimeout = window.setTimeout(() => {
+        setForm(restoredForm);
+        setNotice({
+          tone: "success",
+          message: "Saved progress restored from this browser."
+        });
+      }, 0);
+
+      return () => {
+        window.clearTimeout(restoreTimeout);
+      };
+    } catch {
+      window.localStorage.removeItem(draftStorageKey);
+    }
+  }, [draftStorageKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -466,13 +515,45 @@ export function TimesheetApp({
     }));
   }
 
+  function clearSavedDraft() {
+    try {
+      window.localStorage.removeItem(draftStorageKey);
+    } catch {
+      // localStorage can be unavailable in private browsing or locked-down environments.
+    }
+  }
+
+  function saveDraft() {
+    try {
+      window.localStorage.setItem(
+        draftStorageKey,
+        JSON.stringify({
+          version: DRAFT_STORAGE_VERSION,
+          savedAt: new Date().toISOString(),
+          form
+        })
+      );
+      setNotice({
+        tone: "success",
+        message: "Progress saved to this browser."
+      });
+    } catch {
+      setNotice({
+        tone: "error",
+        message: "Unable to save progress in this browser."
+      });
+    }
+  }
+
   function resetForm() {
-    setEditingId(null);
+    clearSavedDraft();
     setForm({
       ...emptyForm(),
       workforceEmail: profile.workforceEmail
     });
     setNotice(null);
+    setSubmitConfirmOpen(false);
+    setSubmitAcknowledged(false);
   }
 
   async function submitProfile(event: FormEvent<HTMLFormElement>) {
@@ -521,12 +602,22 @@ export function TimesheetApp({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setSubmitAcknowledged(false);
+    setSubmitConfirmOpen(true);
+  }
+
+  async function confirmSubmit() {
+    if (!submitAcknowledged) {
+      return;
+    }
+
     setSaving(true);
     setNotice(null);
+    setSubmitConfirmOpen(false);
 
     try {
-      const response = await fetch(editingId ? `/api/timesheets/${editingId}` : "/api/timesheets", {
-        method: editingId ? "PUT" : "POST",
+      const response = await fetch("/api/timesheets", {
+        method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
@@ -544,9 +635,9 @@ export function TimesheetApp({
       });
       setNotice({
         tone: "success",
-        message: editingId ? "Timesheet updated." : "Timesheet submitted."
+        message: "Timesheet submitted."
       });
-      setEditingId(null);
+      clearSavedDraft();
       setForm({
         ...emptyForm(),
         workforceEmail: profile.workforceEmail
@@ -559,16 +650,6 @@ export function TimesheetApp({
     } finally {
       setSaving(false);
     }
-  }
-
-  function editEntry(entry: TimesheetRecord) {
-    setEditingId(entry.id);
-    setForm(formFromRecord(entry));
-    setNotice({
-      tone: "success",
-      message: "Loaded session for editing."
-    });
-    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   return (
@@ -616,21 +697,11 @@ export function TimesheetApp({
           <div className="border-b border-stone-200 px-5 py-4 sm:px-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-ink">{editingId ? "Edit work session" : "New work session"}</h2>
+                <h2 className="text-lg font-semibold text-ink">New work session</h2>
                 <p className="text-sm text-stone-600">
                   Log the hours once, then add every Live Compare problem you worked on during that time.
                 </p>
               </div>
-              {editingId ? (
-                <button
-                  className="inline-flex h-10 w-fit items-center gap-2 rounded-lg border border-stone-300 bg-white px-3 text-sm font-medium text-stone-700 transition hover:bg-stone-50 focus:outline-none focus:ring-2 focus:ring-fern focus:ring-offset-2"
-                  onClick={resetForm}
-                  type="button"
-                >
-                  <RotateCcw aria-hidden="true" className="h-4 w-4" />
-                  New session
-                </button>
-              ) : null}
             </div>
           </div>
 
@@ -993,6 +1064,14 @@ export function TimesheetApp({
                 Reset
               </button>
               <button
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-fern bg-white px-4 text-sm font-medium text-fern transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-fern focus:ring-offset-2"
+                onClick={saveDraft}
+                type="button"
+              >
+                <Save aria-hidden="true" className="h-4 w-4" />
+                Save
+              </button>
+              <button
                 className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-fern px-4 text-sm font-medium text-white transition hover:bg-[#285f51] focus:outline-none focus:ring-2 focus:ring-fern focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-stone-400"
                 disabled={saving || overSummaryLimit}
                 type="submit"
@@ -1000,9 +1079,9 @@ export function TimesheetApp({
                 {saving ? (
                   <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
                 ) : (
-                  <Save aria-hidden="true" className="h-4 w-4" />
+                  <CheckCircle2 aria-hidden="true" className="h-4 w-4" />
                 )}
-                {editingId ? "Update timesheet" : "Submit timesheet"}
+                Submit timesheet
               </button>
             </div>
           </form>
@@ -1110,9 +1189,7 @@ export function TimesheetApp({
 
               {entries.map((entry) => (
                 <article
-                  className={`rounded-lg border p-4 ${
-                    editingId === entry.id ? "border-fern bg-emerald-50" : "border-stone-200 bg-white"
-                  }`}
+                  className="rounded-lg border border-stone-200 bg-white p-4"
                   key={entry.id}
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -1120,15 +1197,9 @@ export function TimesheetApp({
                       <h3 className="truncate text-sm font-semibold text-ink">{problemIds(entry) || "Work session"}</h3>
                       <p className="mt-1 text-xs leading-5 text-stone-600">{formatDateRange(entry.startAt, entry.endAt)}</p>
                     </div>
-                    <button
-                      aria-label={`Edit ${problemIds(entry) || "work session"}`}
-                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-white text-stone-700 transition hover:bg-stone-50 focus:outline-none focus:ring-2 focus:ring-fern focus:ring-offset-2"
-                      onClick={() => editEntry(entry)}
-                      title="Edit session"
-                      type="button"
-                    >
-                      <SquarePen aria-hidden="true" className="h-4 w-4" />
-                    </button>
+                    <span className="shrink-0 rounded-lg bg-stone-100 px-2 py-1 text-xs font-medium text-stone-700">
+                      Submitted
+                    </span>
                   </div>
                   <p className="mt-3 line-clamp-3 text-sm leading-6 text-stone-700">
                     {entry.problems.map((problem) => problem.summary).join(" ")}
@@ -1152,6 +1223,53 @@ export function TimesheetApp({
           </section>
         </aside>
       </div>
+      {submitConfirmOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/50 px-4 py-6">
+          <section
+            aria-labelledby="submit-confirm-title"
+            aria-modal="true"
+            className="w-full max-w-lg rounded-xl border border-stone-200 bg-white p-5 shadow-panel"
+            role="dialog"
+          >
+            <h2 className="text-lg font-semibold text-ink" id="submit-confirm-title">
+              Submit and lock this timesheet?
+            </h2>
+            <p className="mt-3 text-sm leading-6 text-stone-700">
+              Once this timesheet is submitted, this record can no longer be edited. Please review the reported hours,
+              problems, turns, and comments before continuing.
+            </p>
+            <label className="mt-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <input
+                checked={submitAcknowledged}
+                className="mt-1 rounded border-stone-300 text-fern focus:ring-fern"
+                onChange={(event) => setSubmitAcknowledged(event.target.checked)}
+                type="checkbox"
+              />
+              <span className="text-sm leading-6 text-amber-950">
+                I acknowledge this timesheet will be locked after submission and guarantee that all hours reported here
+                are correct.
+              </span>
+            </label>
+            <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                className="inline-flex h-10 items-center justify-center rounded-lg border border-stone-300 bg-white px-4 text-sm font-medium text-stone-700 transition hover:bg-stone-50 focus:outline-none focus:ring-2 focus:ring-fern focus:ring-offset-2"
+                onClick={() => setSubmitConfirmOpen(false)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-fern px-4 text-sm font-medium text-white transition hover:bg-[#285f51] focus:outline-none focus:ring-2 focus:ring-fern focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-stone-400"
+                disabled={!submitAcknowledged || saving}
+                onClick={confirmSubmit}
+                type="button"
+              >
+                Submit and lock timesheet
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }

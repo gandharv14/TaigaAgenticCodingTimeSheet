@@ -46,7 +46,7 @@ async function resetDebugData(page: Page) {
   await page.request.post("/api/debug/reset");
 }
 
-async function createTimesheet(page: Page, payload: TestPayload) {
+async function createTimesheet(page: Page, payload: TestPayload, options: { testDraftSave?: boolean } = {}) {
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "New work session" })).toBeVisible();
@@ -88,7 +88,24 @@ async function createTimesheet(page: Page, payload: TestPayload) {
   await page.getByLabel("Problem 2 comments").fill("Second problem, same payable work session.");
   await expect(page.getByLabel("Total hours")).toHaveValue("2.5");
 
+  if (options.testDraftSave) {
+    await page.getByRole("button", { exact: true, name: "Save" }).click();
+    await expect(page.getByText("Progress saved to this browser.")).toBeVisible();
+
+    await page.reload();
+
+    await expect(page.getByText("Saved progress restored from this browser.")).toBeVisible();
+    await expect(page.getByLabel("Google Workforce email")).toHaveValue(payload.workforceEmail);
+    await expect(page.getByLabel("Session 2 end time")).toHaveValue("2026-06-16T15:00");
+    await expect(page.getByLabel("Problem 1 Live Compare problem ID")).toHaveValue(payload.problemId);
+    await expect(page.getByLabel("Problem 2 Live Compare problem ID")).toHaveValue(`${payload.problemId}-B`);
+  }
+
   await page.getByRole("button", { name: "Submit timesheet" }).click();
+  await expect(page.getByRole("dialog", { name: "Submit and lock this timesheet?" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Submit and lock timesheet" })).toBeDisabled();
+  await page.getByLabel(/I acknowledge this timesheet will be locked/).check();
+  await page.getByRole("button", { name: "Submit and lock timesheet" }).click();
 
   await expect(page.getByText("Timesheet submitted.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "My history" })).toBeVisible();
@@ -101,7 +118,7 @@ async function createTimesheet(page: Page, payload: TestPayload) {
   await expect(page.getByText("Taiga blocked")).toBeVisible();
 }
 
-test("debug user can create and edit a timesheet", async ({ page }) => {
+test("debug user can save, submit, and cannot edit a submitted timesheet", async ({ page }) => {
   await resetDebugData(page);
   await setDebugUser(page, firstUser.loginEmail, firstUser.name);
 
@@ -116,26 +133,17 @@ test("debug user can create and edit a timesheet", async ({ page }) => {
   await expect(page.getByText("Profile saved.")).toBeVisible();
   await expect(page.getByLabel("Google Workforce email")).toHaveValue(firstUser.workforceEmail);
 
-  await createTimesheet(page, firstUser);
+  await createTimesheet(page, firstUser, { testDraftSave: true });
   await expect(page.getByRole("link", { name: "Admin portal" })).toHaveCount(0);
   await expect(page.getByLabel("Google Workforce email")).toHaveValue(firstUser.workforceEmail);
+  await expect(page.getByText("Submitted", { exact: true }).first()).toBeVisible();
+  await expect(page.getByLabel(new RegExp(`Edit ${firstUser.problemId}`))).toHaveCount(0);
 
-  await page.getByLabel(new RegExp(`Edit ${firstUser.problemId}`)).click();
-
-  await expect(page.getByRole("heading", { name: "Edit work session" })).toBeVisible();
-  await expect(page.getByLabel("Google Workforce email")).toHaveValue(firstUser.workforceEmail);
-  await expect(page.getByLabel("Problem 1 Primary programming language")).toHaveValue(firstUser.primaryProgrammingLanguage);
-  await expect(page.getByLabel("Session 1 start time")).toHaveValue("2026-06-16T09:00");
-  await expect(page.getByLabel("Session 1 end time")).toHaveValue("2026-06-16T10:15");
-  await expect(page.getByLabel("Session 2 start time")).toHaveValue("2026-06-16T14:00");
-  await expect(page.getByLabel("Session 2 end time")).toHaveValue("2026-06-16T15:00");
-  await expect(page.getByLabel("Total hours")).toHaveValue("2.5");
-  await page.getByLabel("Problem 1 Token usage").fill("7777");
-  await page.getByLabel("Problem 1 comments").fill("Updated during Playwright end-to-end coverage.");
-  await page.getByRole("button", { name: "Update timesheet" }).click();
-
-  await expect(page.getByText("Timesheet updated.")).toBeVisible();
-  await expect(page.getByText("8,777 tokens")).toBeVisible();
+  const historyResponse = await page.request.get("/api/timesheets");
+  expect(historyResponse.ok()).toBe(true);
+  const history = (await historyResponse.json()) as { entries: { id: string }[] };
+  const editResponse = await page.request.put(`/api/timesheets/${history.entries[0].id}`, { data: {} });
+  expect(editResponse.status()).toBe(409);
 
   await resetDebugData(page);
 });
