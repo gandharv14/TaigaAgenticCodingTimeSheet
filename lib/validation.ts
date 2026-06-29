@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { hasExplicitTimeZone, isValidDateTime } from "@/lib/date-times";
 import { TASK_TYPES } from "@/lib/task-types";
 import type { TimesheetInput, UserProfileInput } from "@/lib/types";
 
@@ -8,11 +9,6 @@ const MIN_TURNS = 5;
 
 export function countWords(value: string) {
   return value.trim().split(/\s+/).filter(Boolean).length;
-}
-
-function isValidDateTime(value: string) {
-  const parsed = new Date(value);
-  return Number.isFinite(parsed.getTime());
 }
 
 const nullableTrimmedString = z.preprocess(
@@ -57,8 +53,16 @@ export const timesheetInputSchema = z
       .array(
         z.object({
           sessionNumber: z.number().int().positive(),
-          startAt: z.string().trim().refine(isValidDateTime, "Enter a valid session start date and time."),
-          endAt: z.string().trim().refine(isValidDateTime, "Enter a valid session end date and time.")
+          startAt: z
+            .string()
+            .trim()
+            .refine(isValidDateTime, "Enter a valid session start date and time.")
+            .refine(hasExplicitTimeZone, "Session start date and time must include a timezone."),
+          endAt: z
+            .string()
+            .trim()
+            .refine(isValidDateTime, "Enter a valid session end date and time.")
+            .refine(hasExplicitTimeZone, "Session end date and time must include a timezone.")
         })
       )
       .min(1, "At least one work session is required."),

@@ -1,5 +1,9 @@
 const baseUrl = process.env.E2E_BASE_URL ?? "http://127.0.0.1:3010";
 
+function dateTimeLocalToIso(value) {
+  return new Date(value).toISOString();
+}
+
 function payloadFor(suffix, workforceEmail, tokenUsage) {
   return {
     workforceEmail,
@@ -10,8 +14,8 @@ function payloadFor(suffix, workforceEmail, tokenUsage) {
     workSessions: [
       {
         sessionNumber: 1,
-        startAt: "2026-06-16T09:00",
-        endAt: "2026-06-16T10:00"
+        startAt: dateTimeLocalToIso("2026-06-16T09:00"),
+        endAt: dateTimeLocalToIso("2026-06-16T10:00")
       }
     ],
     totalHoursOverride: null,

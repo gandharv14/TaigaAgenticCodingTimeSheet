@@ -1,5 +1,6 @@
 import { isDebugAuthBypassEnabled } from "@/lib/auth0";
 import { userOwnsEntry } from "@/lib/authz";
+import { normalizeDateTimeToIso } from "@/lib/date-times";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import type { TaskType } from "@/lib/task-types";
 import type { AdminTimesheetRecord, TimesheetInput, TimesheetRecord } from "@/lib/types";
@@ -88,8 +89,8 @@ function workSessionsFromRow(row: EntryRow) {
 function normalizedInputSessions(input: TimesheetInput) {
   return input.workSessions.map((session) => ({
     sessionNumber: session.sessionNumber,
-    startAt: new Date(session.startAt).toISOString(),
-    endAt: new Date(session.endAt).toISOString()
+    startAt: normalizeDateTimeToIso(session.startAt),
+    endAt: normalizeDateTimeToIso(session.endAt)
   }));
 }
 
@@ -339,11 +340,11 @@ export async function createTimesheet(input: TimesheetInput, auth0UserId: string
     throw turnsError;
   }
 
-  const workSessions = input.workSessions.map((session) => ({
+  const workSessions = normalizedInputSessions(input).map((session) => ({
     entry_id: entry.id,
     session_number: session.sessionNumber,
-    start_at: new Date(session.startAt).toISOString(),
-    end_at: new Date(session.endAt).toISOString()
+    start_at: session.startAt,
+    end_at: session.endAt
   }));
 
   const { error: workSessionsError } = await supabase.from("timesheet_work_sessions").insert(workSessions);
@@ -449,11 +450,11 @@ export async function updateTimesheet(
     throw deleteSessionsError;
   }
 
-  const workSessions = input.workSessions.map((session) => ({
+  const workSessions = normalizedInputSessions(input).map((session) => ({
     entry_id: id,
     session_number: session.sessionNumber,
-    start_at: new Date(session.startAt).toISOString(),
-    end_at: new Date(session.endAt).toISOString()
+    start_at: session.startAt,
+    end_at: session.endAt
   }));
 
   const { error: workSessionsError } = await supabase.from("timesheet_work_sessions").insert(workSessions);

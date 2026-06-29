@@ -11,8 +11,8 @@ const validPayload = {
   workSessions: [
     {
       sessionNumber: 1,
-      startAt: "2026-06-15T09:00",
-      endAt: "2026-06-15T10:00"
+      startAt: "2026-06-15T09:00:00.000Z",
+      endAt: "2026-06-15T10:00:00.000Z"
     }
   ],
   totalHoursOverride: null,
@@ -55,8 +55,8 @@ describe("timesheet validation", () => {
       workSessions: [
         {
           sessionNumber: 1,
-          startAt: "2026-06-15T09:00",
-          endAt: "2026-06-15T08:59"
+          startAt: "2026-06-15T09:00:00.000Z",
+          endAt: "2026-06-15T08:59:00.000Z"
         }
       ]
     });
@@ -70,13 +70,28 @@ describe("timesheet validation", () => {
       workSessions: [
         {
           sessionNumber: 1,
-          startAt: "2026-06-15T09:00",
-          endAt: "2026-06-15T10:00"
+          startAt: "2026-06-15T09:00:00.000Z",
+          endAt: "2026-06-15T10:00:00.000Z"
         },
         {
           sessionNumber: 2,
-          startAt: "2026-06-15T09:30",
-          endAt: "2026-06-15T11:00"
+          startAt: "2026-06-15T09:30:00.000Z",
+          endAt: "2026-06-15T11:00:00.000Z"
+        }
+      ]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects timezone-naive session datetimes", () => {
+    const result = validateTimesheetInput({
+      ...validPayload,
+      workSessions: [
+        {
+          sessionNumber: 1,
+          startAt: "2026-06-15T09:00",
+          endAt: "2026-06-15T10:00"
         }
       ]
     });

@@ -19,6 +19,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { TASK_TYPES } from "@/lib/task-types";
 import type { TaskType } from "@/lib/task-types";
+import { dateTimeLocalToIso } from "@/lib/date-times";
 import type { TimesheetInput, TimesheetRecord, UserProfileRecord } from "@/lib/types";
 import { countWords } from "@/lib/validation";
 import { calculateWorkSessionHours } from "@/lib/work-sessions";
@@ -131,8 +132,8 @@ function toPayload(form: FormState): TimesheetInput {
     taskUrl: form.taskUrl,
     workSessions: form.workSessions.map((session, index) => ({
       sessionNumber: index + 1,
-      startAt: session.startAt,
-      endAt: session.endAt
+      startAt: dateTimeLocalToIso(session.startAt),
+      endAt: dateTimeLocalToIso(session.endAt)
     })),
     totalHoursOverride: form.usesHoursOverride ? parseOptionalHours(form.totalHours) : null,
     summary: form.summary,

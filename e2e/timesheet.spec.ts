@@ -117,6 +117,10 @@ test("debug user can create and edit a timesheet", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Edit timesheet" })).toBeVisible();
   await expect(page.getByLabel("Google Workforce email")).toHaveValue(firstUser.workforceEmail);
   await expect(page.getByLabel("Primary programming language")).toHaveValue(firstUser.primaryProgrammingLanguage);
+  await expect(page.getByLabel("Session 1 start time")).toHaveValue("2026-06-16T09:00");
+  await expect(page.getByLabel("Session 1 end time")).toHaveValue("2026-06-16T10:15");
+  await expect(page.getByLabel("Session 2 start time")).toHaveValue("2026-06-16T14:00");
+  await expect(page.getByLabel("Session 2 end time")).toHaveValue("2026-06-16T15:00");
   await expect(page.getByLabel("Total hours")).toHaveValue("2.5");
   await page.getByLabel("Token usage").fill("7777");
   await page.getByLabel("Any comments").fill("Updated during Playwright end-to-end coverage.");

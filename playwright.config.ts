@@ -13,6 +13,7 @@ export default defineConfig({
   use: {
     baseURL,
     screenshot: "only-on-failure",
+    timezoneId: "Europe/London",
     trace: "on-first-retry"
   },
   projects: [
@@ -24,6 +25,7 @@ export default defineConfig({
   webServer: {
     command: `npm run build && npm run start -- -p ${port}`,
     env: {
+      TZ: "UTC",
       AUTH_DEBUG_BYPASS: "true",
       AUTH_DEBUG_EMAIL: "debug.alignerr@alignerr.com",
       AUTH_DEBUG_NAME: "Debug User",
