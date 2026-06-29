@@ -1,5 +1,5 @@
 import { TASK_TYPES, type TaskType } from "@/lib/task-types";
-import type { AdminTimesheetRecord } from "@/lib/types";
+import type { AdminTimesheetRecord, TimesheetProblemRecord } from "@/lib/types";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const WEEKLY_THROUGHPUT_WINDOW_SIZE = 5;
@@ -131,6 +131,11 @@ type FilteredEntries = {
   metadata: OutlierFilterAnalytics;
 };
 
+type ProblemAnalyticsRow = {
+  entry: AdminTimesheetRecord;
+  problem: TimesheetProblemRecord;
+};
+
 function round(value: number, digits: number) {
   const scale = 10 ** digits;
   return Math.round((value + Number.EPSILON) * scale) / scale;
@@ -232,9 +237,13 @@ function pearsonCorrelation(xValues: number[], yValues: number[]) {
   return covariance / Math.sqrt(xVariance * yVariance);
 }
 
+function problemRows(entries: AdminTimesheetRecord[]): ProblemAnalyticsRow[] {
+  return entries.flatMap((entry) => entry.problems.map((problem) => ({ entry, problem })));
+}
+
 function tokenValues(entries: AdminTimesheetRecord[]) {
-  return entries
-    .map((entry) => entry.tokenUsage)
+  return problemRows(entries)
+    .map(({ problem }) => problem.tokenUsage)
     .filter((tokenUsage): tokenUsage is number => tokenUsage !== null && Number.isFinite(tokenUsage));
 }
 
@@ -254,14 +263,16 @@ function buildScatter(
   entries: AdminTimesheetRecord[],
   highOutlierCutoff: number | null,
   xLabel: string,
-  xValue: (entry: AdminTimesheetRecord) => number
+  xValue: (row: ProblemAnalyticsRow) => number
 ): TokenScatterAnalytics {
-  const points = entries.flatMap((entry) => {
-    if (entry.tokenUsage === null || entry.tokenUsage <= 0 || !Number.isFinite(entry.tokenUsage)) {
+  const points = problemRows(entries).flatMap((row) => {
+    const tokenUsage = row.problem.tokenUsage;
+
+    if (tokenUsage === null || tokenUsage <= 0 || !Number.isFinite(tokenUsage)) {
       return [];
     }
 
-    const x = xValue(entry);
+    const x = xValue(row);
 
     if (!Number.isFinite(x)) {
       return [];
@@ -269,12 +280,12 @@ function buildScatter(
 
     return [
       {
-        id: entry.id,
-        label: entry.liveCompareProblemId,
+        id: row.problem.id,
+        label: row.problem.liveCompareProblemId,
         x,
-        tokenUsage: entry.tokenUsage,
-        logTokenUsage: Math.log10(entry.tokenUsage),
-        isOutlier: highOutlierCutoff !== null && entry.tokenUsage > highOutlierCutoff
+        tokenUsage,
+        logTokenUsage: Math.log10(tokenUsage),
+        isOutlier: highOutlierCutoff !== null && tokenUsage > highOutlierCutoff
       }
     ];
   });
@@ -293,6 +304,7 @@ function buildScatter(
 
 function summarizeTokenUsage(entries: AdminTimesheetRecord[]): TokenUsageAnalytics {
   const values = tokenValues(entries);
+  const rows = problemRows(entries);
   const sortedValues = [...values].sort((a, b) => a - b);
   const q1 = percentile(sortedValues, 0.25);
   const median = percentile(sortedValues, 0.5);
@@ -303,7 +315,7 @@ function summarizeTokenUsage(entries: AdminTimesheetRecord[]): TokenUsageAnalyti
 
   return {
     reportedRows: values.length,
-    blankRows: entries.length - values.length,
+    blankRows: rows.length - values.length,
     min: sortedValues[0] ?? null,
     max: sortedValues[sortedValues.length - 1] ?? null,
     mean: average(values),
@@ -314,8 +326,8 @@ function summarizeTokenUsage(entries: AdminTimesheetRecord[]): TokenUsageAnalyti
     highOutlierCutoff,
     outlierCount,
     histogramBins: buildHistogramBins(values, highOutlierCutoff),
-    turnsScatter: buildScatter(entries, highOutlierCutoff, "Turn count per timesheet", (entry) => entry.turns.length),
-    hoursScatter: buildScatter(entries, highOutlierCutoff, "Reported hours per problem", (entry) => entry.reportedHours)
+    turnsScatter: buildScatter(entries, highOutlierCutoff, "Turn count per problem", ({ problem }) => problem.turns.length),
+    hoursScatter: buildScatter(entries, highOutlierCutoff, "Reported hours per work session", ({ entry }) => entry.reportedHours)
   };
 }
 
@@ -382,7 +394,11 @@ function filterOutlierEntries(entries: AdminTimesheetRecord[]): FilteredEntries 
   let excludedForTokens = 0;
   const includedEntries = entries.filter((entry) => {
     const isHoursOutlier = !Number.isFinite(entry.reportedHours) || entry.reportedHours <= 0 || entry.reportedHours > reportedHoursMax;
-    const isTokenOutlier = entry.tokenUsage !== null && Number.isFinite(entry.tokenUsage) && tokenUsageMax !== null && entry.tokenUsage > tokenUsageMax;
+    const isTokenOutlier =
+      tokenUsageMax !== null &&
+      entry.problems.some(
+        (problem) => problem.tokenUsage !== null && Number.isFinite(problem.tokenUsage) && problem.tokenUsage > tokenUsageMax
+      );
 
     if (isHoursOutlier) {
       excludedForHours += 1;
@@ -412,12 +428,15 @@ function filterOutlierEntries(entries: AdminTimesheetRecord[]): FilteredEntries 
 
 export function summarizeAdminAnalytics(entries: AdminTimesheetRecord[]): AdminAnalytics {
   const { includedEntries, metadata } = filterOutlierEntries(entries);
+  const includedProblemCount = problemRows(includedEntries).length;
   const counts = new Map<TaskType, number>(TASK_TYPES.map((taskType) => [taskType, 0]));
   const averageHandlingHours = round(average(includedEntries.map((entry) => entry.reportedHours)) ?? 0, 2);
 
   for (const entry of includedEntries) {
-    for (const turn of entry.turns) {
-      counts.set(turn.taskType, (counts.get(turn.taskType) ?? 0) + 1);
+    for (const problem of entry.problems) {
+      for (const turn of problem.turns) {
+        counts.set(turn.taskType, (counts.get(turn.taskType) ?? 0) + 1);
+      }
     }
   }
 
@@ -425,7 +444,7 @@ export function summarizeAdminAnalytics(entries: AdminTimesheetRecord[]): AdminA
   const categoryRows = TASK_TYPES.map((category) => {
     const count = counts.get(category) ?? 0;
     const share = totalTurns === 0 ? 0 : round((count / totalTurns) * 100, 1);
-    const averagePerTask = includedEntries.length === 0 ? 0 : round(count / includedEntries.length, 2);
+    const averagePerTask = includedProblemCount === 0 ? 0 : round(count / includedProblemCount, 2);
     const idealShare = IDEAL_CATEGORY_SHARE[category];
 
     return {
@@ -439,7 +458,7 @@ export function summarizeAdminAnalytics(entries: AdminTimesheetRecord[]): AdminA
   });
 
   return {
-    taskCount: includedEntries.length,
+    taskCount: includedProblemCount,
     totalTurns,
     averageHandlingHours,
     outlierFilter: metadata,

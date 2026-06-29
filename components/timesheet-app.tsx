@@ -12,14 +12,14 @@ import {
   Save,
   ShieldCheck,
   SquarePen,
+  Trash2,
   UserRound
 } from "lucide-react";
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-import { TASK_TYPES } from "@/lib/task-types";
-import type { TaskType } from "@/lib/task-types";
 import { dateTimeLocalToIso } from "@/lib/date-times";
+import { TASK_TYPES, type TaskType } from "@/lib/task-types";
 import type { TimesheetInput, TimesheetRecord, UserProfileRecord } from "@/lib/types";
 import { countWords } from "@/lib/validation";
 import { calculateWorkSessionHours } from "@/lib/work-sessions";
@@ -29,20 +29,24 @@ type FormWorkSession = {
   endAt: string;
 };
 
-type FormState = {
-  workforceEmail: string;
+type FormProblem = {
   primaryProgrammingLanguage: string;
   secondaryProgrammingLanguages: string;
   liveCompareProblemId: string;
   taskUrl: string;
-  workSessions: FormWorkSession[];
-  totalHours: string;
-  usesHoursOverride: boolean;
   summary: string;
   comments: string;
   tokenUsage: string;
   blockedOnTaigaBug: boolean;
   turns: TaskType[];
+};
+
+type FormState = {
+  workforceEmail: string;
+  workSessions: FormWorkSession[];
+  totalHours: string;
+  usesHoursOverride: boolean;
+  problems: FormProblem[];
 };
 
 type ProfileState = {
@@ -61,21 +65,27 @@ const DEFAULT_TASK_TYPE: TaskType = "Debugging";
 const MIN_TURNS = 5;
 const WORKFORCE_EMAIL_PLACEHOLDER = "Kx9m**@alignerrworkforce.com";
 
-function emptyForm(): FormState {
+function emptyProblem(): FormProblem {
   return {
-    workforceEmail: "",
     primaryProgrammingLanguage: "",
     secondaryProgrammingLanguages: "",
     liveCompareProblemId: "",
     taskUrl: "",
-    workSessions: [{ startAt: "", endAt: "" }],
-    totalHours: "",
-    usesHoursOverride: false,
     summary: "",
     comments: "",
     tokenUsage: "",
     blockedOnTaigaBug: false,
     turns: Array.from({ length: MIN_TURNS }, () => DEFAULT_TASK_TYPE)
+  };
+}
+
+function emptyForm(): FormState {
+  return {
+    workforceEmail: "",
+    workSessions: [{ startAt: "", endAt: "" }],
+    totalHours: "",
+    usesHoursOverride: false,
+    problems: [emptyProblem()]
   };
 }
 
@@ -105,6 +115,10 @@ function formatHours(value: number) {
   });
 }
 
+function formatProblemLabel(problem: Pick<FormProblem, "liveCompareProblemId">, index: number) {
+  return problem.liveCompareProblemId.trim() || `Problem ${index + 1}`;
+}
+
 function workSessionsForCalculation(workSessions: FormWorkSession[]) {
   return workSessions.map((session, index) => ({
     sessionNumber: index + 1,
@@ -125,46 +139,54 @@ function parseOptionalHours(value: string) {
 function toPayload(form: FormState): TimesheetInput {
   return {
     workforceEmail: form.workforceEmail,
-    primaryProgrammingLanguage: form.primaryProgrammingLanguage,
-    secondaryProgrammingLanguages:
-      form.secondaryProgrammingLanguages.trim().length > 0 ? form.secondaryProgrammingLanguages : null,
-    liveCompareProblemId: form.liveCompareProblemId,
-    taskUrl: form.taskUrl,
     workSessions: form.workSessions.map((session, index) => ({
       sessionNumber: index + 1,
       startAt: dateTimeLocalToIso(session.startAt),
       endAt: dateTimeLocalToIso(session.endAt)
     })),
     totalHoursOverride: form.usesHoursOverride ? parseOptionalHours(form.totalHours) : null,
-    summary: form.summary,
-    comments: form.comments.trim().length > 0 ? form.comments : null,
-    tokenUsage: Number(form.tokenUsage),
-    blockedOnTaigaBug: form.blockedOnTaigaBug,
-    turns: form.turns.map((taskType, index) => ({
-      turnNumber: index + 1,
-      taskType
+    problems: form.problems.map((problem) => ({
+      primaryProgrammingLanguage: problem.primaryProgrammingLanguage,
+      secondaryProgrammingLanguages:
+        problem.secondaryProgrammingLanguages.trim().length > 0 ? problem.secondaryProgrammingLanguages : null,
+      liveCompareProblemId: problem.liveCompareProblemId,
+      taskUrl: problem.taskUrl,
+      summary: problem.summary,
+      comments: problem.comments.trim().length > 0 ? problem.comments : null,
+      tokenUsage: Number(problem.tokenUsage),
+      blockedOnTaigaBug: problem.blockedOnTaigaBug,
+      turns: problem.turns.map((taskType, index) => ({
+        turnNumber: index + 1,
+        taskType
+      }))
     }))
+  };
+}
+
+function problemFromRecord(record: TimesheetRecord["problems"][number]): FormProblem {
+  return {
+    primaryProgrammingLanguage: record.primaryProgrammingLanguage,
+    secondaryProgrammingLanguages: record.secondaryProgrammingLanguages ?? "",
+    liveCompareProblemId: record.liveCompareProblemId,
+    taskUrl: record.taskUrl,
+    summary: record.summary,
+    comments: record.comments ?? "",
+    tokenUsage: record.tokenUsage === null ? "" : String(record.tokenUsage),
+    blockedOnTaigaBug: record.blockedOnTaigaBug,
+    turns: record.turns.map((turn) => turn.taskType)
   };
 }
 
 function formFromRecord(record: TimesheetRecord): FormState {
   return {
     workforceEmail: record.workforceEmail,
-    primaryProgrammingLanguage: record.primaryProgrammingLanguage,
-    secondaryProgrammingLanguages: record.secondaryProgrammingLanguages ?? "",
-    liveCompareProblemId: record.liveCompareProblemId,
-    taskUrl: record.taskUrl,
     workSessions: record.workSessions.map((session) => ({
       startAt: dateTimeLocalValue(session.startAt),
       endAt: dateTimeLocalValue(session.endAt)
     })),
     totalHours: record.totalHoursOverride === null ? "" : String(record.totalHoursOverride),
     usesHoursOverride: record.totalHoursOverride !== null,
-    summary: record.summary,
-    comments: record.comments ?? "",
-    tokenUsage: record.tokenUsage === null ? "" : String(record.tokenUsage),
-    blockedOnTaigaBug: record.blockedOnTaigaBug,
-    turns: record.turns.map((turn) => turn.taskType)
+    problems: record.problems.length > 0 ? record.problems.map(problemFromRecord) : [emptyProblem()]
   };
 }
 
@@ -200,6 +222,18 @@ function formatDateRange(startAt: string, endAt: string) {
   })}`;
 }
 
+function problemIds(record: TimesheetRecord) {
+  return record.problems.map((problem) => problem.liveCompareProblemId).join(", ");
+}
+
+function totalTurns(record: TimesheetRecord) {
+  return record.problems.reduce((sum, problem) => sum + problem.turns.length, 0);
+}
+
+function totalTokens(record: TimesheetRecord) {
+  return record.problems.reduce((sum, problem) => sum + (problem.tokenUsage ?? 0), 0);
+}
+
 export function TimesheetApp({
   debugMode,
   isAdmin,
@@ -222,14 +256,14 @@ export function TimesheetApp({
   const [notice, setNotice] = useState<Notice | null>(null);
   const [profileNotice, setProfileNotice] = useState<Notice | null>(null);
 
-  const summaryWords = useMemo(() => countWords(form.summary), [form.summary]);
+  const problemWordCounts = useMemo(() => form.problems.map((problem) => countWords(problem.summary)), [form.problems]);
+  const overSummaryLimit = problemWordCounts.some((words) => words > 100);
   const calculatedHours = useMemo(
     () => calculateWorkSessionHours(workSessionsForCalculation(form.workSessions)),
     [form.workSessions]
   );
   const totalHoursInput = form.usesHoursOverride ? form.totalHours : hoursInputValue(calculatedHours);
   const submittedHours = form.usesHoursOverride ? parseOptionalHours(form.totalHours) : calculatedHours;
-  const overSummaryLimit = summaryWords > 100;
 
   useEffect(() => {
     let cancelled = false;
@@ -362,36 +396,73 @@ export function TimesheetApp({
     }));
   }
 
-  function updateProfileField<K extends keyof ProfileState>(key: K, value: ProfileState[K]) {
-    setProfile((current) => ({
+  function updateProblem<K extends keyof FormProblem>(problemIndex: number, key: K, value: FormProblem[K]) {
+    setForm((current) => ({
       ...current,
-      [key]: value
+      problems: current.problems.map((problem, index) => (index === problemIndex ? { ...problem, [key]: value } : problem))
     }));
   }
 
-  function setTurnCount(nextCount: number) {
-    const count = Math.max(MIN_TURNS, nextCount);
+  function addProblem() {
+    setForm((current) => ({
+      ...current,
+      problems: [...current.problems, emptyProblem()]
+    }));
+  }
+
+  function removeProblem(index: number) {
     setForm((current) => {
-      if (count === current.turns.length) {
+      if (current.problems.length <= 1) {
         return current;
       }
 
-      const turns =
-        count > current.turns.length
-          ? [...current.turns, ...Array.from({ length: count - current.turns.length }, () => DEFAULT_TASK_TYPE)]
-          : current.turns.slice(0, count);
-
       return {
         ...current,
-        turns
+        problems: current.problems.filter((_, problemIndex) => problemIndex !== index)
       };
     });
   }
 
-  function setTurnType(index: number, taskType: TaskType) {
+  function setTurnCount(problemIndex: number, nextCount: number) {
+    const count = Math.max(MIN_TURNS, nextCount);
     setForm((current) => ({
       ...current,
-      turns: current.turns.map((turn, turnIndex) => (turnIndex === index ? taskType : turn))
+      problems: current.problems.map((problem, index) => {
+        if (index !== problemIndex || count === problem.turns.length) {
+          return problem;
+        }
+
+        const turns =
+          count > problem.turns.length
+            ? [...problem.turns, ...Array.from({ length: count - problem.turns.length }, () => DEFAULT_TASK_TYPE)]
+            : problem.turns.slice(0, count);
+
+        return {
+          ...problem,
+          turns
+        };
+      })
+    }));
+  }
+
+  function setTurnType(problemIndex: number, turnIndex: number, taskType: TaskType) {
+    setForm((current) => ({
+      ...current,
+      problems: current.problems.map((problem, index) =>
+        index === problemIndex
+          ? {
+              ...problem,
+              turns: problem.turns.map((turn, currentTurnIndex) => (currentTurnIndex === turnIndex ? taskType : turn))
+            }
+          : problem
+      )
+    }));
+  }
+
+  function updateProfileField<K extends keyof ProfileState>(key: K, value: ProfileState[K]) {
+    setProfile((current) => ({
+      ...current,
+      [key]: value
     }));
   }
 
@@ -495,7 +566,7 @@ export function TimesheetApp({
     setForm(formFromRecord(entry));
     setNotice({
       tone: "success",
-      message: "Loaded entry for editing."
+      message: "Loaded session for editing."
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -545,8 +616,10 @@ export function TimesheetApp({
           <div className="border-b border-stone-200 px-5 py-4 sm:px-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-ink">{editingId ? "Edit timesheet" : "New timesheet"}</h2>
-                <p className="text-sm text-stone-600">Capture problem details, turn work types, and timing.</p>
+                <h2 className="text-lg font-semibold text-ink">{editingId ? "Edit work session" : "New work session"}</h2>
+                <p className="text-sm text-stone-600">
+                  Log the hours once, then add every Live Compare problem you worked on during that time.
+                </p>
               </div>
               {editingId ? (
                 <button
@@ -555,7 +628,7 @@ export function TimesheetApp({
                   type="button"
                 >
                   <RotateCcw aria-hidden="true" className="h-4 w-4" />
-                  New entry
+                  New session
                 </button>
               ) : null}
             </div>
@@ -602,60 +675,12 @@ export function TimesheetApp({
               </label>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="block">
-                <span className="text-sm font-medium text-stone-700">Live Compare problem ID</span>
-                <input
-                  className="mt-1 h-11 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
-                  onChange={(event) => updateField("liveCompareProblemId", event.target.value)}
-                  required
-                  type="text"
-                  value={form.liveCompareProblemId}
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-medium text-stone-700">Primary programming language</span>
-                <input
-                  className="mt-1 h-11 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
-                  onChange={(event) => updateField("primaryProgrammingLanguage", event.target.value)}
-                  placeholder="TypeScript"
-                  required
-                  type="text"
-                  value={form.primaryProgrammingLanguage}
-                />
-              </label>
-            </div>
-
-            <label className="block">
-              <span className="text-sm font-medium text-stone-700">Secondary programming languages</span>
-              <input
-                className="mt-1 h-11 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
-                onChange={(event) => updateField("secondaryProgrammingLanguages", event.target.value)}
-                placeholder="Python, SQL"
-                type="text"
-                value={form.secondaryProgrammingLanguages}
-              />
-            </label>
-
-            <label className="block">
-              <span className="text-sm font-medium text-stone-700">Task URL</span>
-              <input
-                className="mt-1 h-11 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
-                onChange={(event) => updateField("taskUrl", event.target.value)}
-                placeholder="https://"
-                required
-                type="url"
-                value={form.taskUrl}
-              />
-            </label>
-
             <section className="rounded-lg border border-stone-200 bg-stone-50 p-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <h3 className="text-sm font-semibold text-ink">Work sessions</h3>
                   <p className="text-sm text-stone-600">
-                    Add one row for each time you actively worked on this task. Gaps are excluded from the automatic total.
+                    Add one row for each active work period. These hours are paid once, even when multiple problems are logged below.
                   </p>
                 </div>
                 <span className="w-fit rounded-lg bg-white px-3 py-1 text-sm font-medium text-stone-700">
@@ -748,112 +773,215 @@ export function TimesheetApp({
               </div>
             </section>
 
-            <section className="rounded-lg border border-stone-200 bg-stone-50 p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <section className="space-y-4">
+              <div className="flex flex-col gap-3 rounded-lg border border-stone-200 bg-stone-50 p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h3 className="text-sm font-semibold text-ink">Turns</h3>
-                  <p className="text-sm text-stone-600">Minimum 5 turns. Assign a task type to every turn.</p>
+                  <h3 className="text-sm font-semibold text-ink">Problems worked in this session</h3>
+                  <p className="text-sm text-stone-600">
+                    Add every problem you touched. The same session hours apply to the whole group and are not split.
+                  </p>
                 </div>
-                <div className="flex h-10 w-fit items-center overflow-hidden rounded-lg border border-stone-300 bg-white">
-                  <button
-                    aria-label="Decrease turns"
-                    className="flex h-10 w-10 items-center justify-center text-stone-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-300"
-                    disabled={form.turns.length <= MIN_TURNS}
-                    onClick={() => setTurnCount(form.turns.length - 1)}
-                    title="Decrease turns"
-                    type="button"
-                  >
-                    <Minus aria-hidden="true" className="h-4 w-4" />
-                  </button>
-                  <input
-                    aria-label="Number of turns"
-                    className="h-10 w-16 border-x border-y-0 border-stone-300 p-0 text-center text-sm font-semibold focus:ring-0"
-                    min={MIN_TURNS}
-                    onChange={(event) => setTurnCount(Number(event.target.value))}
-                    type="number"
-                    value={form.turns.length}
-                  />
-                  <button
-                    aria-label="Increase turns"
-                    className="flex h-10 w-10 items-center justify-center text-stone-700 transition hover:bg-stone-100"
-                    onClick={() => setTurnCount(form.turns.length + 1)}
-                    title="Increase turns"
-                    type="button"
-                  >
-                    <Plus aria-hidden="true" className="h-4 w-4" />
-                  </button>
-                </div>
+                <button
+                  className="inline-flex h-10 w-fit items-center gap-2 rounded-lg border border-stone-300 bg-white px-3 text-sm font-medium text-stone-700 transition hover:bg-stone-50 focus:outline-none focus:ring-2 focus:ring-fern focus:ring-offset-2"
+                  onClick={addProblem}
+                  type="button"
+                >
+                  <Plus aria-hidden="true" className="h-4 w-4" />
+                  Add another problem
+                </button>
               </div>
 
-              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {form.turns.map((turn, index) => (
-                  <label className="block rounded-lg border border-stone-200 bg-white p-3" key={`${index}-${turn}`}>
-                    <span className="text-xs font-semibold uppercase tracking-normal text-stone-500">
-                      Turn {index + 1}
-                    </span>
-                    <select
-                      className="mt-2 h-10 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
-                      onChange={(event) => setTurnType(index, event.target.value as TaskType)}
-                      value={turn}
-                    >
-                      {TASK_TYPES.map((taskType) => (
-                        <option key={taskType} value={taskType}>
-                          {taskType}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ))}
-              </div>
+              {form.problems.map((problem, problemIndex) => {
+                const summaryWords = problemWordCounts[problemIndex] ?? 0;
+                const problemLabel = formatProblemLabel(problem, problemIndex);
+
+                return (
+                  <article className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm" key={problemIndex}>
+                    <div className="flex flex-col gap-3 border-b border-stone-100 pb-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <h4 className="text-base font-semibold text-ink">{problemLabel}</h4>
+                        <p className="text-sm text-stone-600">Problem {problemIndex + 1} details and turn categories.</p>
+                      </div>
+                      <button
+                        className="inline-flex h-9 w-fit items-center gap-2 rounded-lg border border-stone-300 bg-white px-3 text-sm font-medium text-stone-700 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:text-stone-300"
+                        disabled={form.problems.length <= 1}
+                        onClick={() => removeProblem(problemIndex)}
+                        type="button"
+                      >
+                        <Trash2 aria-hidden="true" className="h-4 w-4" />
+                        Remove problem
+                      </button>
+                    </div>
+
+                    <div className="mt-4 grid gap-4 md:grid-cols-2">
+                      <label className="block">
+                        <span className="text-sm font-medium text-stone-700">Live Compare problem ID</span>
+                        <input
+                          aria-label={`Problem ${problemIndex + 1} Live Compare problem ID`}
+                          className="mt-1 h-11 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
+                          onChange={(event) => updateProblem(problemIndex, "liveCompareProblemId", event.target.value)}
+                          required
+                          type="text"
+                          value={problem.liveCompareProblemId}
+                        />
+                      </label>
+
+                      <label className="block">
+                        <span className="text-sm font-medium text-stone-700">Primary programming language</span>
+                        <input
+                          aria-label={`Problem ${problemIndex + 1} Primary programming language`}
+                          className="mt-1 h-11 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
+                          onChange={(event) => updateProblem(problemIndex, "primaryProgrammingLanguage", event.target.value)}
+                          placeholder="TypeScript"
+                          required
+                          type="text"
+                          value={problem.primaryProgrammingLanguage}
+                        />
+                      </label>
+                    </div>
+
+                    <div className="mt-4 grid gap-4 md:grid-cols-2">
+                      <label className="block">
+                        <span className="text-sm font-medium text-stone-700">Secondary programming languages</span>
+                        <input
+                          aria-label={`Problem ${problemIndex + 1} Secondary programming languages`}
+                          className="mt-1 h-11 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
+                          onChange={(event) => updateProblem(problemIndex, "secondaryProgrammingLanguages", event.target.value)}
+                          placeholder="Python, SQL"
+                          type="text"
+                          value={problem.secondaryProgrammingLanguages}
+                        />
+                      </label>
+
+                      <label className="block">
+                        <span className="text-sm font-medium text-stone-700">Task URL</span>
+                        <input
+                          aria-label={`Problem ${problemIndex + 1} Task URL`}
+                          className="mt-1 h-11 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
+                          onChange={(event) => updateProblem(problemIndex, "taskUrl", event.target.value)}
+                          placeholder="https://"
+                          required
+                          type="url"
+                          value={problem.taskUrl}
+                        />
+                      </label>
+                    </div>
+
+                    <section className="mt-4 rounded-lg border border-stone-200 bg-stone-50 p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <h5 className="text-sm font-semibold text-ink">Turns</h5>
+                          <p className="text-sm text-stone-600">Minimum 5 turns. Assign a task type to every turn.</p>
+                        </div>
+                        <div className="flex h-10 w-fit items-center overflow-hidden rounded-lg border border-stone-300 bg-white">
+                          <button
+                            aria-label={`Decrease turns for problem ${problemIndex + 1}`}
+                            className="flex h-10 w-10 items-center justify-center text-stone-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-300"
+                            disabled={problem.turns.length <= MIN_TURNS}
+                            onClick={() => setTurnCount(problemIndex, problem.turns.length - 1)}
+                            title="Decrease turns"
+                            type="button"
+                          >
+                            <Minus aria-hidden="true" className="h-4 w-4" />
+                          </button>
+                          <input
+                            aria-label={`Number of turns for problem ${problemIndex + 1}`}
+                            className="h-10 w-16 border-x border-y-0 border-stone-300 p-0 text-center text-sm font-semibold focus:ring-0"
+                            min={MIN_TURNS}
+                            onChange={(event) => setTurnCount(problemIndex, Number(event.target.value))}
+                            type="number"
+                            value={problem.turns.length}
+                          />
+                          <button
+                            aria-label={`Increase turns for problem ${problemIndex + 1}`}
+                            className="flex h-10 w-10 items-center justify-center text-stone-700 transition hover:bg-stone-100"
+                            onClick={() => setTurnCount(problemIndex, problem.turns.length + 1)}
+                            title="Increase turns"
+                            type="button"
+                          >
+                            <Plus aria-hidden="true" className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                        {problem.turns.map((turn, turnIndex) => (
+                          <label className="block rounded-lg border border-stone-200 bg-white p-3" key={`${turnIndex}-${turn}`}>
+                            <span className="text-xs font-semibold uppercase tracking-normal text-stone-500">
+                              Turn {turnIndex + 1}
+                            </span>
+                            <select
+                              aria-label={`Problem ${problemIndex + 1} turn ${turnIndex + 1} task type`}
+                              className="mt-2 h-10 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
+                              onChange={(event) => setTurnType(problemIndex, turnIndex, event.target.value as TaskType)}
+                              value={turn}
+                            >
+                              {TASK_TYPES.map((taskType) => (
+                                <option key={taskType} value={taskType}>
+                                  {taskType}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        ))}
+                      </div>
+                    </section>
+
+                    <label className="mt-4 block">
+                      <span className="flex items-center justify-between gap-3 text-sm font-medium text-stone-700">
+                        <span>In 100 words or less describe this problem work</span>
+                        <span className={summaryWords > 100 ? "text-red-700" : "text-stone-500"}>{summaryWords}/100</span>
+                      </span>
+                      <textarea
+                        aria-label={`Problem ${problemIndex + 1} task description`}
+                        className="mt-1 min-h-28 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
+                        onChange={(event) => updateProblem(problemIndex, "summary", event.target.value)}
+                        required
+                        value={problem.summary}
+                      />
+                    </label>
+
+                    <div className="mt-4 grid gap-4 md:grid-cols-2">
+                      <label className="block">
+                        <span className="text-sm font-medium text-stone-700">Token usage</span>
+                        <input
+                          aria-label={`Problem ${problemIndex + 1} Token usage`}
+                          className="mt-1 h-11 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
+                          min={0}
+                          onChange={(event) => updateProblem(problemIndex, "tokenUsage", event.target.value)}
+                          required
+                          type="number"
+                          value={problem.tokenUsage}
+                        />
+                      </label>
+
+                      <label className="flex h-full min-h-16 items-center gap-3 rounded-lg border border-stone-200 bg-stone-50 px-4 py-3">
+                        <input
+                          aria-label={`Problem ${problemIndex + 1} blocked on Taiga bug`}
+                          checked={problem.blockedOnTaigaBug}
+                          className="rounded border-stone-300 text-fern focus:ring-fern"
+                          onChange={(event) => updateProblem(problemIndex, "blockedOnTaigaBug", event.target.checked)}
+                          type="checkbox"
+                        />
+                        <span className="text-sm font-medium text-stone-700">
+                          Were you blocked on this problem because of a Taiga error or bug?
+                        </span>
+                      </label>
+                    </div>
+
+                    <label className="mt-4 block">
+                      <span className="text-sm font-medium text-stone-700">Any comments</span>
+                      <textarea
+                        aria-label={`Problem ${problemIndex + 1} comments`}
+                        className="mt-1 min-h-24 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
+                        onChange={(event) => updateProblem(problemIndex, "comments", event.target.value)}
+                        value={problem.comments}
+                      />
+                    </label>
+                  </article>
+                );
+              })}
             </section>
-
-            <label className="block">
-              <span className="flex items-center justify-between gap-3 text-sm font-medium text-stone-700">
-                <span>In 100 words or less describe your task</span>
-                <span className={overSummaryLimit ? "text-red-700" : "text-stone-500"}>{summaryWords}/100</span>
-              </span>
-              <textarea
-                className="mt-1 min-h-28 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
-                onChange={(event) => updateField("summary", event.target.value)}
-                required
-                value={form.summary}
-              />
-            </label>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="block">
-                <span className="text-sm font-medium text-stone-700">Token usage</span>
-                <input
-                  className="mt-1 h-11 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
-                  min={0}
-                  onChange={(event) => updateField("tokenUsage", event.target.value)}
-                  required
-                  type="number"
-                  value={form.tokenUsage}
-                />
-              </label>
-
-              <label className="flex h-full min-h-16 items-center gap-3 rounded-lg border border-stone-200 bg-stone-50 px-4 py-3">
-                <input
-                  checked={form.blockedOnTaigaBug}
-                  className="rounded border-stone-300 text-fern focus:ring-fern"
-                  onChange={(event) => updateField("blockedOnTaigaBug", event.target.checked)}
-                  type="checkbox"
-                />
-                <span className="text-sm font-medium text-stone-700">
-                  Were you blocked on this task because of a Taiga error or bug?
-                </span>
-              </label>
-            </div>
-
-            <label className="block">
-              <span className="text-sm font-medium text-stone-700">Any comments</span>
-              <textarea
-                className="mt-1 min-h-24 w-full rounded-lg border-stone-300 text-sm focus:border-fern focus:ring-fern"
-                onChange={(event) => updateField("comments", event.target.value)}
-                value={form.comments}
-              />
-            </label>
 
             <div className="flex flex-col gap-3 border-t border-stone-200 pt-5 sm:flex-row sm:items-center sm:justify-end">
               <button
@@ -869,7 +997,11 @@ export function TimesheetApp({
                 disabled={saving || overSummaryLimit}
                 type="submit"
               >
-                {saving ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" /> : <Save aria-hidden="true" className="h-4 w-4" />}
+                {saving ? (
+                  <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save aria-hidden="true" className="h-4 w-4" />
+                )}
                 {editingId ? "Update timesheet" : "Submit timesheet"}
               </button>
             </div>
@@ -947,7 +1079,11 @@ export function TimesheetApp({
                 disabled={savingProfile || loadingProfile}
                 type="submit"
               >
-                {savingProfile ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" /> : <Save aria-hidden="true" className="h-4 w-4" />}
+                {savingProfile ? (
+                  <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save aria-hidden="true" className="h-4 w-4" />
+                )}
                 Save profile
               </button>
             </form>
@@ -959,60 +1095,59 @@ export function TimesheetApp({
               <h2 className="text-lg font-semibold text-ink">My history</h2>
             </div>
             <div className="max-h-[calc(100vh-25rem)] space-y-3 overflow-auto px-4 py-4">
-            {loadingHistory ? (
-              <div className="flex items-center gap-2 rounded-lg border border-stone-200 bg-stone-50 p-4 text-sm text-stone-600">
-                <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
-                Loading history
-              </div>
-            ) : null}
+              {loadingHistory ? (
+                <div className="flex items-center gap-2 rounded-lg border border-stone-200 bg-stone-50 p-4 text-sm text-stone-600">
+                  <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+                  Loading history
+                </div>
+              ) : null}
 
-            {!loadingHistory && entries.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-stone-300 bg-stone-50 p-4 text-sm leading-6 text-stone-600">
-                No submissions yet.
-              </div>
-            ) : null}
+              {!loadingHistory && entries.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-stone-300 bg-stone-50 p-4 text-sm leading-6 text-stone-600">
+                  No submissions yet.
+                </div>
+              ) : null}
 
-            {entries.map((entry) => (
-              <article
-                className={`rounded-lg border p-4 ${
-                  editingId === entry.id ? "border-fern bg-emerald-50" : "border-stone-200 bg-white"
-                }`}
-                key={entry.id}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h3 className="truncate text-sm font-semibold text-ink">{entry.liveCompareProblemId}</h3>
-                    <p className="mt-1 text-xs leading-5 text-stone-600">{formatDateRange(entry.startAt, entry.endAt)}</p>
+              {entries.map((entry) => (
+                <article
+                  className={`rounded-lg border p-4 ${
+                    editingId === entry.id ? "border-fern bg-emerald-50" : "border-stone-200 bg-white"
+                  }`}
+                  key={entry.id}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="truncate text-sm font-semibold text-ink">{problemIds(entry) || "Work session"}</h3>
+                      <p className="mt-1 text-xs leading-5 text-stone-600">{formatDateRange(entry.startAt, entry.endAt)}</p>
+                    </div>
+                    <button
+                      aria-label={`Edit ${problemIds(entry) || "work session"}`}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-white text-stone-700 transition hover:bg-stone-50 focus:outline-none focus:ring-2 focus:ring-fern focus:ring-offset-2"
+                      onClick={() => editEntry(entry)}
+                      title="Edit session"
+                      type="button"
+                    >
+                      <SquarePen aria-hidden="true" className="h-4 w-4" />
+                    </button>
                   </div>
-                  <button
-                    aria-label={`Edit ${entry.liveCompareProblemId}`}
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-white text-stone-700 transition hover:bg-stone-50 focus:outline-none focus:ring-2 focus:ring-fern focus:ring-offset-2"
-                    onClick={() => editEntry(entry)}
-                    title="Edit entry"
-                    type="button"
-                  >
-                    <SquarePen aria-hidden="true" className="h-4 w-4" />
-                  </button>
-                </div>
-                <p className="mt-3 line-clamp-3 text-sm leading-6 text-stone-700">{entry.summary}</p>
-                <div className="mt-3 flex flex-wrap gap-2 text-xs text-stone-600">
-                  <span className="rounded-lg bg-emerald-50 px-2 py-1 text-emerald-900">
-                    {entry.primaryProgrammingLanguage}
-                  </span>
-                  {entry.secondaryProgrammingLanguages ? (
-                    <span className="rounded-lg bg-stone-100 px-2 py-1">{entry.secondaryProgrammingLanguages}</span>
-                  ) : null}
-                  <span className="rounded-lg bg-stone-100 px-2 py-1">{entry.turns.length} turns</span>
-                  <span className="rounded-lg bg-stone-100 px-2 py-1">
-                    {formatHours(entry.reportedHours)} hours{entry.totalHoursOverride !== null ? " (override)" : ""}
-                  </span>
-                  {entry.tokenUsage !== null ? (
-                    <span className="rounded-lg bg-stone-100 px-2 py-1">{entry.tokenUsage.toLocaleString()} tokens</span>
-                  ) : null}
-                  {entry.blockedOnTaigaBug ? <span className="rounded-lg bg-amber-100 px-2 py-1 text-amber-900">Taiga blocked</span> : null}
-                </div>
-              </article>
-            ))}
+                  <p className="mt-3 line-clamp-3 text-sm leading-6 text-stone-700">
+                    {entry.problems.map((problem) => problem.summary).join(" ")}
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2 text-xs text-stone-600">
+                    <span className="rounded-lg bg-emerald-50 px-2 py-1 text-emerald-900">
+                      {entry.problemCount} {entry.problemCount === 1 ? "problem" : "problems"}
+                    </span>
+                    <span className="rounded-lg bg-stone-100 px-2 py-1">{totalTurns(entry)} turns</span>
+                    <span className="rounded-lg bg-stone-100 px-2 py-1">
+                      {formatHours(entry.reportedHours)} hours{entry.totalHoursOverride !== null ? " (override)" : ""}
+                    </span>
+                    <span className="rounded-lg bg-stone-100 px-2 py-1">{totalTokens(entry).toLocaleString()} tokens</span>
+                    {entry.problems.some((problem) => problem.blockedOnTaigaBug) ? (
+                      <span className="rounded-lg bg-amber-100 px-2 py-1 text-amber-900">Taiga blocked</span>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
             </div>
           </section>
         </aside>

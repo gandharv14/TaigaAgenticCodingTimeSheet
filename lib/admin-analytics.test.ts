@@ -4,10 +4,14 @@ import { summarizeAdminAnalytics } from "@/lib/admin-analytics";
 import type { TaskType } from "@/lib/task-types";
 import type { AdminTimesheetRecord } from "@/lib/types";
 
+type RecordOverrides = Partial<Pick<AdminTimesheetRecord, "createdAt" | "endAt" | "reportedHours" | "startAt">> & {
+  tokenUsage?: number | null;
+};
+
 function record(
   id: string,
   turns: TaskType[],
-  overrides: Partial<Pick<AdminTimesheetRecord, "createdAt" | "endAt" | "reportedHours" | "startAt" | "tokenUsage">> = {}
+  overrides: RecordOverrides = {}
 ): AdminTimesheetRecord {
   const startAt = overrides.startAt ?? "2026-06-16T16:00:00.000Z";
   const endAt = overrides.endAt ?? "2026-06-16T17:00:00.000Z";
@@ -17,10 +21,6 @@ function record(
     auth0UserId: `auth0|${id}`,
     auth0Email: `${id}@labelbox.com`,
     workforceEmail: `${id}@alignerrworkforce.com`,
-    primaryProgrammingLanguage: "TypeScript",
-    secondaryProgrammingLanguages: null,
-    liveCompareProblemId: `LC-${id.toUpperCase()}`,
-    taskUrl: `https://taiga.example/tasks/${id}`,
     startAt,
     endAt,
     workSessions: [
@@ -33,14 +33,24 @@ function record(
     calculatedHours: overrides.reportedHours ?? 1,
     totalHoursOverride: null,
     reportedHours: overrides.reportedHours ?? 1,
-    summary: "Fixture record",
-    comments: null,
-    tokenUsage: overrides.tokenUsage ?? null,
-    blockedOnTaigaBug: false,
-    turns: turns.map((taskType, index) => ({
-      turnNumber: index + 1,
-      taskType
-    })),
+    problemCount: 1,
+    problems: [
+      {
+        id: `problem-${id}`,
+        primaryProgrammingLanguage: "TypeScript",
+        secondaryProgrammingLanguages: null,
+        liveCompareProblemId: `LC-${id.toUpperCase()}`,
+        taskUrl: `https://taiga.example/tasks/${id}`,
+        summary: "Fixture record",
+        comments: null,
+        tokenUsage: overrides.tokenUsage ?? null,
+        blockedOnTaigaBug: false,
+        turns: turns.map((taskType, index) => ({
+          turnNumber: index + 1,
+          taskType
+        }))
+      }
+    ],
     createdAt: overrides.createdAt ?? "2026-06-16T18:00:00.000Z",
     updatedAt: "2026-06-16T18:00:00.000Z"
   };
@@ -195,5 +205,27 @@ describe("summarizeAdminAnalytics", () => {
     expect(analytics.tokenUsage.mean).toBeNull();
     expect(analytics.tokenUsage.turnsScatter.correlation).toBeNull();
     expect(analytics.weeklyThroughput.bins).toEqual([]);
+  });
+
+  it("counts shared work-session hours once for multi-problem sessions", () => {
+    const multiProblem = record("multi", ["Debugging", "Testing"], { reportedHours: 2, tokenUsage: 1000 });
+    multiProblem.problemCount = 2;
+    multiProblem.problems.push({
+      ...multiProblem.problems[0],
+      id: "problem-multi-two",
+      liveCompareProblemId: "LC-MULTI-TWO",
+      tokenUsage: 2000,
+      turns: [
+        { turnNumber: 1, taskType: "Code writing" },
+        { turnNumber: 2, taskType: "Code review" }
+      ]
+    });
+
+    const analytics = summarizeAdminAnalytics([multiProblem]);
+
+    expect(analytics.taskCount).toBe(2);
+    expect(analytics.totalTurns).toBe(4);
+    expect(analytics.averageHandlingHours).toBe(2);
+    expect(analytics.tokenUsage.reportedRows).toBe(2);
   });
 });

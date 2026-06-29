@@ -100,6 +100,22 @@ function formatLastUpdated(value: Date | null) {
   return `Last updated ${value.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}`;
 }
 
+function totalTurns(entry: AdminTimesheetRecord) {
+  return entry.problems.reduce((sum, problem) => sum + problem.turns.length, 0);
+}
+
+function totalTokens(entry: AdminTimesheetRecord) {
+  return entry.problems.reduce((sum, problem) => sum + (problem.tokenUsage ?? 0), 0);
+}
+
+function problemLanguageSummary(entry: AdminTimesheetRecord) {
+  return entry.problems
+    .map((problem) =>
+      [problem.primaryProgrammingLanguage, problem.secondaryProgrammingLanguages].filter(Boolean).join(" / ")
+    )
+    .join("; ");
+}
+
 function ChartCard({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
   return (
     <section className="rounded-lg border border-stone-200 bg-white p-5 shadow-panel">
@@ -416,18 +432,18 @@ function AnalyticsDashboard({ analytics }: { analytics: AdminAnalytics }) {
     <section className="mb-6 space-y-6" data-testid="admin-analytics">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <StatCard
-          detail={`${filter.includedRows} included of ${filter.totalRows} submitted rows`}
-          label="Timesheets analyzed"
+          detail={`${filter.includedRows} included of ${filter.totalRows} submitted work sessions`}
+          label="Problems analyzed"
           value={formatInteger(analytics.taskCount)}
         />
         <StatCard detail="Classified task-category turns" label="Total turns" value={formatInteger(analytics.totalTurns)} />
         <StatCard
-          detail="Average reported hours per problem"
+          detail="Average reported hours per work session"
           label="Average handling time"
           value={`${formatDecimal(analytics.averageHandlingHours, 2)} hrs`}
         />
         <StatCard
-          detail={`${formatInteger(analytics.tokenUsage.blankRows)} rows missing token usage`}
+          detail={`${formatInteger(analytics.tokenUsage.blankRows)} problems missing token usage`}
           label="Token rows"
           value={formatInteger(analytics.tokenUsage.reportedRows)}
         />
@@ -439,7 +455,7 @@ function AnalyticsDashboard({ analytics }: { analytics: AdminAnalytics }) {
       </div>
 
       <p className="rounded-lg border border-stone-200 bg-stone-50 p-3 text-xs leading-5 text-stone-600">
-        Filtered out {formatInteger(filter.excludedRows)} obvious outlier rows before calculating dashboard metrics. Hours range:{" "}
+        Filtered out {formatInteger(filter.excludedRows)} obvious outlier work sessions before calculating dashboard metrics. Hours range:{" "}
         {formatDecimal(filter.reportedHoursMin, 2)}-{filter.reportedHoursMax === null ? "n/a" : formatDecimal(filter.reportedHoursMax, 2)}{" "}
         hrs; token cutoff: {formatTokens(filter.tokenUsageMax)}. Reason counts: {formatInteger(filter.excludedForHours)} hour outliers,{" "}
         {formatInteger(filter.excludedForTokens)} token outliers.
@@ -474,7 +490,7 @@ function AnalyticsDashboard({ analytics }: { analytics: AdminAnalytics }) {
           />
         </ChartCard>
         <ChartCard
-          description={`Metric: category turn count divided by ${formatInteger(analytics.taskCount)} tasks.`}
+          description={`Metric: category turn count divided by ${formatInteger(analytics.taskCount)} problems.`}
           title="Average Category Distribution Per Task"
         >
           <HorizontalBarChart
@@ -492,7 +508,7 @@ function AnalyticsDashboard({ analytics }: { analytics: AdminAnalytics }) {
       </div>
 
       <ChartCard
-        description="Histogram of reported token usage in timesheets. Values are bucketed by token range; high outlier buckets are muted red."
+        description="Histogram of reported token usage by problem. Values are bucketed by token range; high outlier buckets are muted red."
         title="Token Usage Distribution"
       >
         <HistogramChart analytics={analytics} />
@@ -500,7 +516,7 @@ function AnalyticsDashboard({ analytics }: { analytics: AdminAnalytics }) {
 
       <div className="grid gap-6 xl:grid-cols-2">
         <ChartCard
-          description="Scatter plot of each timesheet row with reported tokens. Token axis is logarithmic to show both the main cluster and outliers."
+          description="Scatter plot of each problem with reported tokens. Token axis is logarithmic to show both the main cluster and outliers."
           title="Turn Count vs Token Usage"
         >
           <ScatterPlot analytics={analytics.tokenUsage.turnsScatter} />
@@ -511,7 +527,7 @@ function AnalyticsDashboard({ analytics }: { analytics: AdminAnalytics }) {
           </p>
         </ChartCard>
         <ChartCard
-          description="Scatter plot of each problem with reported hours and token usage. Token axis is logarithmic to keep outliers visible."
+          description="Scatter plot of each problem with its parent work-session hours and token usage. Token axis is logarithmic to keep outliers visible."
           title="Reported Hours vs Token Usage"
         >
           <ScatterPlot analytics={analytics.tokenUsage.hoursScatter} />
@@ -619,7 +635,7 @@ export function AdminPortal({ adminEmail }: { adminEmail: string }) {
           <div className="flex flex-col gap-3 border-b border-stone-200 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-ink">All Timesheets</h2>
-              <p className="text-sm text-stone-600">{entries.length} submissions across all users</p>
+              <p className="text-sm text-stone-600">{entries.length} work sessions across all users</p>
             </div>
             <div className="flex items-center gap-2 text-xs text-stone-500">
               <RefreshCw aria-hidden="true" className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
@@ -647,13 +663,13 @@ export function AdminPortal({ adminEmail }: { adminEmail: string }) {
               <table className="min-w-full divide-y divide-stone-200 text-sm">
                 <thead className="bg-stone-50 text-left text-xs font-semibold uppercase tracking-normal text-stone-500">
                   <tr>
-                    <th className="px-4 py-3">Problem</th>
+                    <th className="px-4 py-3">Problems</th>
                     <th className="px-4 py-3">Login email</th>
                     <th className="px-4 py-3">Workforce email</th>
                     <th className="px-4 py-3">Languages</th>
                     <th className="px-4 py-3">Time</th>
                     <th className="px-4 py-3">Hours</th>
-                    <th className="px-4 py-3">Turns</th>
+                    <th className="px-4 py-3">Total turns</th>
                     <th className="px-4 py-3">Tokens</th>
                     <th className="px-4 py-3">Blocked</th>
                     <th className="px-4 py-3">Summary</th>
@@ -662,18 +678,19 @@ export function AdminPortal({ adminEmail }: { adminEmail: string }) {
                 <tbody className="divide-y divide-stone-100">
                   {entries.map((entry) => (
                     <tr key={entry.id} className="align-top">
-                      <td className="max-w-52 px-4 py-3 font-medium text-ink">
-                        <a className="hover:underline" href={entry.taskUrl}>
-                          {entry.liveCompareProblemId}
-                        </a>
+                      <td className="max-w-64 px-4 py-3 font-medium text-ink">
+                        <div className="space-y-1">
+                          {entry.problems.map((problem) => (
+                            <a className="block hover:underline" href={problem.taskUrl} key={problem.id}>
+                              {problem.liveCompareProblemId}
+                            </a>
+                          ))}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-stone-700">{entry.auth0Email ?? "Unknown"}</td>
                       <td className="px-4 py-3 text-stone-700">{entry.workforceEmail}</td>
                       <td className="min-w-48 px-4 py-3 text-stone-700">
-                        {entry.primaryProgrammingLanguage}
-                        {entry.secondaryProgrammingLanguages ? (
-                          <span className="block text-xs text-stone-500">{entry.secondaryProgrammingLanguages}</span>
-                        ) : null}
+                        {problemLanguageSummary(entry)}
                       </td>
                       <td className="min-w-56 px-4 py-3 text-stone-700">
                         {formatDate(entry.startAt)}
@@ -688,12 +705,14 @@ export function AdminPortal({ adminEmail }: { adminEmail: string }) {
                           </span>
                         ) : null}
                       </td>
-                      <td className="px-4 py-3 text-stone-700">{entry.turns.length}</td>
+                      <td className="px-4 py-3 text-stone-700">{totalTurns(entry)}</td>
+                      <td className="px-4 py-3 text-stone-700">{totalTokens(entry).toLocaleString()}</td>
                       <td className="px-4 py-3 text-stone-700">
-                        {entry.tokenUsage === null ? "None" : entry.tokenUsage.toLocaleString()}
+                        {entry.problems.some((problem) => problem.blockedOnTaigaBug) ? "Yes" : "No"}
                       </td>
-                      <td className="px-4 py-3 text-stone-700">{entry.blockedOnTaigaBug ? "Yes" : "No"}</td>
-                      <td className="min-w-72 px-4 py-3 text-stone-700">{entry.summary}</td>
+                      <td className="min-w-72 px-4 py-3 text-stone-700">
+                        {entry.problems.map((problem) => `${problem.liveCompareProblemId}: ${problem.summary}`).join(" ")}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

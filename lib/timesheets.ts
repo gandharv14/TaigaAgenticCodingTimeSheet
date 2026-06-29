@@ -3,29 +3,40 @@ import { userOwnsEntry } from "@/lib/authz";
 import { normalizeDateTimeToIso } from "@/lib/date-times";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import type { TaskType } from "@/lib/task-types";
-import type { AdminTimesheetRecord, TimesheetInput, TimesheetRecord } from "@/lib/types";
+import type {
+  AdminTimesheetRecord,
+  TimesheetInput,
+  TimesheetProblemInput,
+  TimesheetProblemRecord,
+  TimesheetRecord
+} from "@/lib/types";
 import { calculateWorkSessionHours, deriveSessionBounds, reportedHours } from "@/lib/work-sessions";
 
-type EntryRow = {
+type BatchRow = {
   id: string;
   auth0_user_id?: string;
   auth0_email: string | null;
   workforce_email: string;
+  start_at: string;
+  end_at: string;
+  total_hours_override?: number | string | null;
+  created_at: string;
+  updated_at: string;
+  timesheet_batch_work_sessions?: WorkSessionRow[];
+  timesheet_entries?: EntryRow[];
+};
+
+type EntryRow = {
+  id: string;
   primary_programming_language?: string | null;
   secondary_programming_languages?: string | null;
   live_compare_problem_id: string;
   task_url: string;
-  start_at: string;
-  end_at: string;
-  total_hours_override?: number | string | null;
   summary: string;
   comments: string | null;
   token_usage: number | null;
   blocked_on_taiga_bug: boolean;
-  created_at: string;
-  updated_at: string;
   timesheet_turns?: TurnRow[];
-  timesheet_work_sessions?: WorkSessionRow[];
 };
 
 type TurnRow = {
@@ -51,9 +62,9 @@ type DebugRecord = TimesheetRecord & {
 const debugRecords: DebugRecord[] = [];
 const ADMIN_PAGE_SIZE = 1000;
 const USER_SELECT =
-  "id, auth0_email, workforce_email, primary_programming_language, secondary_programming_languages, live_compare_problem_id, task_url, start_at, end_at, total_hours_override, summary, comments, token_usage, blocked_on_taiga_bug, created_at, updated_at, timesheet_turns(turn_number, task_type), timesheet_work_sessions(session_number, start_at, end_at)";
+  "id, auth0_email, workforce_email, start_at, end_at, total_hours_override, created_at, updated_at, timesheet_batch_work_sessions(session_number, start_at, end_at), timesheet_entries(id, primary_programming_language, secondary_programming_languages, live_compare_problem_id, task_url, summary, comments, token_usage, blocked_on_taiga_bug, timesheet_turns(turn_number, task_type))";
 const ADMIN_SELECT =
-  "id, auth0_user_id, auth0_email, workforce_email, primary_programming_language, secondary_programming_languages, live_compare_problem_id, task_url, start_at, end_at, total_hours_override, summary, comments, token_usage, blocked_on_taiga_bug, created_at, updated_at, timesheet_turns(turn_number, task_type), timesheet_work_sessions(session_number, start_at, end_at)";
+  "id, auth0_user_id, auth0_email, workforce_email, start_at, end_at, total_hours_override, created_at, updated_at, timesheet_batch_work_sessions(session_number, start_at, end_at), timesheet_entries(id, primary_programming_language, secondary_programming_languages, live_compare_problem_id, task_url, summary, comments, token_usage, blocked_on_taiga_bug, timesheet_turns(turn_number, task_type))";
 
 function nullableNumber(value: number | string | null | undefined) {
   if (value === null || value === undefined) {
@@ -64,8 +75,16 @@ function nullableNumber(value: number | string | null | undefined) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function workSessionsFromRow(row: EntryRow) {
-  const sessions = [...(row.timesheet_work_sessions ?? [])]
+function normalizedInputSessions(input: TimesheetInput) {
+  return input.workSessions.map((session) => ({
+    sessionNumber: session.sessionNumber,
+    startAt: normalizeDateTimeToIso(session.startAt),
+    endAt: normalizeDateTimeToIso(session.endAt)
+  }));
+}
+
+function workSessionsFromRow(row: BatchRow) {
+  const sessions = [...(row.timesheet_batch_work_sessions ?? [])]
     .sort((a, b) => a.session_number - b.session_number)
     .map((session) => ({
       sessionNumber: session.session_number,
@@ -86,12 +105,26 @@ function workSessionsFromRow(row: EntryRow) {
   ];
 }
 
-function normalizedInputSessions(input: TimesheetInput) {
-  return input.workSessions.map((session) => ({
-    sessionNumber: session.sessionNumber,
-    startAt: normalizeDateTimeToIso(session.startAt),
-    endAt: normalizeDateTimeToIso(session.endAt)
-  }));
+function problemsFromRow(row: BatchRow): TimesheetProblemRecord[] {
+  return [...(row.timesheet_entries ?? [])]
+    .sort((a, b) => a.live_compare_problem_id.localeCompare(b.live_compare_problem_id))
+    .map((entry) => ({
+      id: entry.id,
+      primaryProgrammingLanguage: entry.primary_programming_language ?? "Not specified",
+      secondaryProgrammingLanguages: entry.secondary_programming_languages ?? null,
+      liveCompareProblemId: entry.live_compare_problem_id,
+      taskUrl: entry.task_url,
+      summary: entry.summary,
+      comments: entry.comments,
+      tokenUsage: entry.token_usage,
+      blockedOnTaigaBug: entry.blocked_on_taiga_bug,
+      turns: [...(entry.timesheet_turns ?? [])]
+        .sort((a, b) => a.turn_number - b.turn_number)
+        .map((turn) => ({
+          turnNumber: turn.turn_number,
+          taskType: turn.task_type
+        }))
+    }));
 }
 
 function toPublicDebugRecord(record: DebugRecord): TimesheetRecord {
@@ -99,21 +132,14 @@ function toPublicDebugRecord(record: DebugRecord): TimesheetRecord {
     id: record.id,
     auth0Email: record.auth0Email,
     workforceEmail: record.workforceEmail,
-    primaryProgrammingLanguage: record.primaryProgrammingLanguage,
-    secondaryProgrammingLanguages: record.secondaryProgrammingLanguages,
-    liveCompareProblemId: record.liveCompareProblemId,
-    taskUrl: record.taskUrl,
     workSessions: record.workSessions,
     totalHoursOverride: record.totalHoursOverride,
     startAt: record.startAt,
     endAt: record.endAt,
     calculatedHours: record.calculatedHours,
     reportedHours: record.reportedHours,
-    summary: record.summary,
-    comments: record.comments,
-    tokenUsage: record.tokenUsage,
-    blockedOnTaigaBug: record.blockedOnTaigaBug,
-    turns: record.turns,
+    problemCount: record.problemCount,
+    problems: record.problems,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt
   };
@@ -126,48 +152,37 @@ function toPublicAdminDebugRecord(record: DebugRecord): AdminTimesheetRecord {
   };
 }
 
-function toRecord(row: EntryRow): TimesheetRecord {
+function toRecord(row: BatchRow): TimesheetRecord {
   const workSessions = workSessionsFromRow(row);
   const calculatedHours = calculateWorkSessionHours(workSessions);
   const totalHoursOverride = nullableNumber(row.total_hours_override);
+  const problems = problemsFromRow(row);
 
   return {
     id: row.id,
     auth0Email: row.auth0_email,
     workforceEmail: row.workforce_email,
-    primaryProgrammingLanguage: row.primary_programming_language ?? "Not specified",
-    secondaryProgrammingLanguages: row.secondary_programming_languages ?? null,
-    liveCompareProblemId: row.live_compare_problem_id,
-    taskUrl: row.task_url,
     workSessions,
     totalHoursOverride,
     startAt: row.start_at,
     endAt: row.end_at,
     calculatedHours,
     reportedHours: reportedHours(calculatedHours, totalHoursOverride),
-    summary: row.summary,
-    comments: row.comments,
-    tokenUsage: row.token_usage,
-    blockedOnTaigaBug: row.blocked_on_taiga_bug,
-    turns: [...(row.timesheet_turns ?? [])]
-      .sort((a, b) => a.turn_number - b.turn_number)
-      .map((turn) => ({
-        turnNumber: turn.turn_number,
-        taskType: turn.task_type
-      })),
+    problemCount: problems.length,
+    problems,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
 }
 
-function toAdminRecord(row: EntryRow): AdminTimesheetRecord {
+function toAdminRecord(row: BatchRow): AdminTimesheetRecord {
   return {
     ...toRecord(row),
     auth0UserId: row.auth0_user_id ?? ""
   };
 }
 
-function entryPayload(input: TimesheetInput, auth0UserId: string, auth0Email: string | null) {
+function batchPayload(input: TimesheetInput, auth0UserId: string, auth0Email: string | null) {
   const workSessions = normalizedInputSessions(input);
   const { startAt, endAt } = deriveSessionBounds(workSessions);
 
@@ -175,17 +190,110 @@ function entryPayload(input: TimesheetInput, auth0UserId: string, auth0Email: st
     auth0_user_id: auth0UserId,
     auth0_email: auth0Email,
     workforce_email: input.workforceEmail,
-    primary_programming_language: input.primaryProgrammingLanguage,
-    secondary_programming_languages: input.secondaryProgrammingLanguages,
-    live_compare_problem_id: input.liveCompareProblemId,
-    task_url: input.taskUrl,
+    start_at: startAt,
+    end_at: endAt,
+    total_hours_override: input.totalHoursOverride
+  };
+}
+
+function entryPayload(
+  problem: TimesheetProblemInput,
+  batchId: string,
+  input: TimesheetInput,
+  auth0UserId: string,
+  auth0Email: string | null
+) {
+  const workSessions = normalizedInputSessions(input);
+  const { startAt, endAt } = deriveSessionBounds(workSessions);
+
+  return {
+    work_batch_id: batchId,
+    auth0_user_id: auth0UserId,
+    auth0_email: auth0Email,
+    workforce_email: input.workforceEmail,
+    primary_programming_language: problem.primaryProgrammingLanguage,
+    secondary_programming_languages: problem.secondaryProgrammingLanguages,
+    live_compare_problem_id: problem.liveCompareProblemId,
+    task_url: problem.taskUrl,
     start_at: startAt,
     end_at: endAt,
     total_hours_override: input.totalHoursOverride,
-    summary: input.summary,
-    comments: input.comments,
-    token_usage: input.tokenUsage,
-    blocked_on_taiga_bug: input.blockedOnTaigaBug
+    summary: problem.summary,
+    comments: problem.comments,
+    token_usage: problem.tokenUsage,
+    blocked_on_taiga_bug: problem.blockedOnTaigaBug
+  };
+}
+
+async function insertBatchChildren(
+  batchId: string,
+  input: TimesheetInput,
+  auth0UserId: string,
+  auth0Email: string | null
+) {
+  const supabase = getSupabaseAdmin();
+  const workSessions = normalizedInputSessions(input).map((session) => ({
+    batch_id: batchId,
+    session_number: session.sessionNumber,
+    start_at: session.startAt,
+    end_at: session.endAt
+  }));
+
+  const { error: workSessionsError } = await supabase.from("timesheet_batch_work_sessions").insert(workSessions);
+
+  if (workSessionsError) {
+    throw workSessionsError;
+  }
+
+  for (const problem of input.problems) {
+    const { data: insertedEntry, error: entryError } = await supabase
+      .from("timesheet_entries")
+      .insert(entryPayload(problem, batchId, input, auth0UserId, auth0Email))
+      .select("id")
+      .single();
+
+    if (entryError) {
+      throw entryError;
+    }
+
+    const turns = problem.turns.map((turn) => ({
+      entry_id: insertedEntry.id,
+      turn_number: turn.turnNumber,
+      task_type: turn.taskType
+    }));
+
+    const { error: turnsError } = await supabase.from("timesheet_turns").insert(turns);
+
+    if (turnsError) {
+      throw turnsError;
+    }
+  }
+}
+
+function createDebugRecord(input: TimesheetInput, auth0UserId: string, auth0Email: string | null, existing?: DebugRecord) {
+  const now = new Date().toISOString();
+  const workSessions = normalizedInputSessions(input);
+  const { startAt, endAt } = deriveSessionBounds(workSessions);
+  const calculatedHours = calculateWorkSessionHours(workSessions);
+
+  return {
+    id: existing?.id ?? crypto.randomUUID(),
+    auth0UserId,
+    auth0Email,
+    workforceEmail: input.workforceEmail,
+    workSessions,
+    totalHoursOverride: input.totalHoursOverride,
+    startAt,
+    endAt,
+    calculatedHours,
+    reportedHours: reportedHours(calculatedHours, input.totalHoursOverride),
+    problemCount: input.problems.length,
+    problems: input.problems.map((problem, index) => ({
+      id: existing?.problems[index]?.id ?? crypto.randomUUID(),
+      ...problem
+    })),
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now
   };
 }
 
@@ -200,7 +308,7 @@ export async function listTimesheetsForUser(auth0UserId: string) {
   const supabase = getSupabaseAdmin();
 
   const { data, error } = await supabase
-    .from("timesheet_entries")
+    .from("timesheet_work_batches")
     .select(USER_SELECT)
     .eq("auth0_user_id", auth0UserId)
     .order("created_at", { ascending: false });
@@ -209,7 +317,7 @@ export async function listTimesheetsForUser(auth0UserId: string) {
     throw error;
   }
 
-  return (data as EntryRow[]).map(toRecord);
+  return (data as BatchRow[]).map(toRecord);
 }
 
 export async function listAllTimesheets() {
@@ -220,11 +328,11 @@ export async function listAllTimesheets() {
   }
 
   const supabase = getSupabaseAdmin();
-  const rows: EntryRow[] = [];
+  const rows: BatchRow[] = [];
 
   for (let from = 0; ; from += ADMIN_PAGE_SIZE) {
     const { data, error } = await supabase
-      .from("timesheet_entries")
+      .from("timesheet_work_batches")
       .select(ADMIN_SELECT)
       .order("created_at", { ascending: false })
       .range(from, from + ADMIN_PAGE_SIZE - 1);
@@ -233,7 +341,7 @@ export async function listAllTimesheets() {
       throw error;
     }
 
-    const page = (data as EntryRow[]) ?? [];
+    const page = (data as BatchRow[]) ?? [];
     rows.push(...page);
 
     if (page.length < ADMIN_PAGE_SIZE) {
@@ -268,7 +376,7 @@ export async function getTimesheetForUser(id: string, auth0UserId: string) {
   const supabase = getSupabaseAdmin();
 
   const { data, error } = await supabase
-    .from("timesheet_entries")
+    .from("timesheet_work_batches")
     .select(USER_SELECT)
     .eq("id", id)
     .eq("auth0_user_id", auth0UserId)
@@ -278,83 +386,36 @@ export async function getTimesheetForUser(id: string, auth0UserId: string) {
     throw error;
   }
 
-  return toRecord(data as EntryRow);
+  return toRecord(data as BatchRow);
 }
 
 export async function createTimesheet(input: TimesheetInput, auth0UserId: string, auth0Email: string | null) {
   if (isDebugAuthBypassEnabled()) {
-    const now = new Date().toISOString();
-    const workSessions = normalizedInputSessions(input);
-    const { startAt, endAt } = deriveSessionBounds(workSessions);
-    const calculatedHours = calculateWorkSessionHours(workSessions);
-    const record: DebugRecord = {
-      id: crypto.randomUUID(),
-      auth0UserId,
-      auth0Email,
-      workforceEmail: input.workforceEmail,
-      primaryProgrammingLanguage: input.primaryProgrammingLanguage,
-      secondaryProgrammingLanguages: input.secondaryProgrammingLanguages,
-      liveCompareProblemId: input.liveCompareProblemId,
-      taskUrl: input.taskUrl,
-      workSessions,
-      totalHoursOverride: input.totalHoursOverride,
-      startAt,
-      endAt,
-      calculatedHours,
-      reportedHours: reportedHours(calculatedHours, input.totalHoursOverride),
-      summary: input.summary,
-      comments: input.comments,
-      tokenUsage: input.tokenUsage,
-      blockedOnTaigaBug: input.blockedOnTaigaBug,
-      turns: input.turns,
-      createdAt: now,
-      updatedAt: now
-    };
-
+    const record = createDebugRecord(input, auth0UserId, auth0Email);
     debugRecords.unshift(record);
     return toPublicDebugRecord(record);
   }
 
   const supabase = getSupabaseAdmin();
 
-  const { data: entry, error: entryError } = await supabase
-    .from("timesheet_entries")
-    .insert(entryPayload(input, auth0UserId, auth0Email))
+  const { data: batch, error: batchError } = await supabase
+    .from("timesheet_work_batches")
+    .insert(batchPayload(input, auth0UserId, auth0Email))
     .select("id")
     .single();
 
-  if (entryError) {
-    throw entryError;
+  if (batchError) {
+    throw batchError;
   }
 
-  const turns = input.turns.map((turn) => ({
-    entry_id: entry.id,
-    turn_number: turn.turnNumber,
-    task_type: turn.taskType
-  }));
-
-  const { error: turnsError } = await supabase.from("timesheet_turns").insert(turns);
-
-  if (turnsError) {
-    await supabase.from("timesheet_entries").delete().eq("id", entry.id).eq("auth0_user_id", auth0UserId);
-    throw turnsError;
+  try {
+    await insertBatchChildren(batch.id, input, auth0UserId, auth0Email);
+  } catch (error) {
+    await supabase.from("timesheet_work_batches").delete().eq("id", batch.id).eq("auth0_user_id", auth0UserId);
+    throw error;
   }
 
-  const workSessions = normalizedInputSessions(input).map((session) => ({
-    entry_id: entry.id,
-    session_number: session.sessionNumber,
-    start_at: session.startAt,
-    end_at: session.endAt
-  }));
-
-  const { error: workSessionsError } = await supabase.from("timesheet_work_sessions").insert(workSessions);
-
-  if (workSessionsError) {
-    await supabase.from("timesheet_entries").delete().eq("id", entry.id).eq("auth0_user_id", auth0UserId);
-    throw workSessionsError;
-  }
-
-  return getTimesheetForUser(entry.id, auth0UserId);
+  return getTimesheetForUser(batch.id, auth0UserId);
 }
 
 export async function updateTimesheet(
@@ -370,32 +431,7 @@ export async function updateTimesheet(
       return null;
     }
 
-    const existing = debugRecords[index];
-    const workSessions = normalizedInputSessions(input);
-    const { startAt, endAt } = deriveSessionBounds(workSessions);
-    const calculatedHours = calculateWorkSessionHours(workSessions);
-    const updated: DebugRecord = {
-      ...existing,
-      auth0Email,
-      workforceEmail: input.workforceEmail,
-      primaryProgrammingLanguage: input.primaryProgrammingLanguage,
-      secondaryProgrammingLanguages: input.secondaryProgrammingLanguages,
-      liveCompareProblemId: input.liveCompareProblemId,
-      taskUrl: input.taskUrl,
-      workSessions,
-      totalHoursOverride: input.totalHoursOverride,
-      startAt,
-      endAt,
-      calculatedHours,
-      reportedHours: reportedHours(calculatedHours, input.totalHoursOverride),
-      summary: input.summary,
-      comments: input.comments,
-      tokenUsage: input.tokenUsage,
-      blockedOnTaigaBug: input.blockedOnTaigaBug,
-      turns: input.turns,
-      updatedAt: new Date().toISOString()
-    };
-
+    const updated = createDebugRecord(input, auth0UserId, auth0Email, debugRecords[index]);
     debugRecords[index] = updated;
     return toPublicDebugRecord(updated);
   }
@@ -403,7 +439,7 @@ export async function updateTimesheet(
   const supabase = getSupabaseAdmin();
 
   const { data: existing, error: existingError } = await supabase
-    .from("timesheet_entries")
+    .from("timesheet_work_batches")
     .select("id, auth0_user_id")
     .eq("id", id)
     .maybeSingle();
@@ -416,52 +452,29 @@ export async function updateTimesheet(
     return null;
   }
 
-  const { error: entryError } = await supabase
-    .from("timesheet_entries")
-    .update(entryPayload(input, auth0UserId, auth0Email))
+  const { error: batchError } = await supabase
+    .from("timesheet_work_batches")
+    .update(batchPayload(input, auth0UserId, auth0Email))
     .eq("id", id)
     .eq("auth0_user_id", auth0UserId);
 
-  if (entryError) {
-    throw entryError;
+  if (batchError) {
+    throw batchError;
   }
 
-  const { error: deleteError } = await supabase.from("timesheet_turns").delete().eq("entry_id", id);
-
-  if (deleteError) {
-    throw deleteError;
-  }
-
-  const turns = input.turns.map((turn) => ({
-    entry_id: id,
-    turn_number: turn.turnNumber,
-    task_type: turn.taskType
-  }));
-
-  const { error: turnsError } = await supabase.from("timesheet_turns").insert(turns);
-
-  if (turnsError) {
-    throw turnsError;
-  }
-
-  const { error: deleteSessionsError } = await supabase.from("timesheet_work_sessions").delete().eq("entry_id", id);
+  const { error: deleteSessionsError } = await supabase.from("timesheet_batch_work_sessions").delete().eq("batch_id", id);
 
   if (deleteSessionsError) {
     throw deleteSessionsError;
   }
 
-  const workSessions = normalizedInputSessions(input).map((session) => ({
-    entry_id: id,
-    session_number: session.sessionNumber,
-    start_at: session.startAt,
-    end_at: session.endAt
-  }));
+  const { error: deleteEntriesError } = await supabase.from("timesheet_entries").delete().eq("work_batch_id", id);
 
-  const { error: workSessionsError } = await supabase.from("timesheet_work_sessions").insert(workSessions);
-
-  if (workSessionsError) {
-    throw workSessionsError;
+  if (deleteEntriesError) {
+    throw deleteEntriesError;
   }
+
+  await insertBatchChildren(id, input, auth0UserId, auth0Email);
 
   return getTimesheetForUser(id, auth0UserId);
 }

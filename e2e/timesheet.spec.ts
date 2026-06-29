@@ -49,15 +49,11 @@ async function resetDebugData(page: Page) {
 async function createTimesheet(page: Page, payload: TestPayload) {
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: "New timesheet" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "New work session" })).toBeVisible();
   await expect(page.getByLabel("Alignerr login email")).toHaveValue(payload.loginEmail);
   await expect(page.getByRole("textbox", { name: "Google Workforce email" })).toBeVisible();
 
   await page.getByLabel("Google Workforce email").fill(payload.workforceEmail);
-  await page.getByLabel("Live Compare problem ID").fill(payload.problemId);
-  await page.getByLabel("Primary programming language").fill(payload.primaryProgrammingLanguage);
-  await page.getByLabel("Secondary programming languages").fill(payload.secondaryProgrammingLanguages);
-  await page.getByLabel("Task URL").fill(payload.taskUrl);
   await page.getByLabel("Session 1 start time").fill("2026-06-16T09:00");
   await page.getByLabel("Session 1 end time").fill("2026-06-16T10:15");
   await expect(page.getByLabel("Total hours")).toHaveValue("1.25");
@@ -67,29 +63,41 @@ async function createTimesheet(page: Page, payload: TestPayload) {
   await expect(page.getByLabel("Total hours")).toHaveValue("2.25");
   await page.getByLabel("Total hours").fill("2.5");
 
-  await expect(page.getByLabel("Number of turns")).toHaveValue("5");
-  await page.getByLabel("Increase turns").click();
-  await expect(page.getByLabel("Number of turns")).toHaveValue("6");
-  await page.locator("select").first().selectOption("Root Cause Analysis");
-  await page.locator("select").nth(1).selectOption("Code writing");
-  await page.locator("select").nth(5).selectOption("Testing");
+  await page.getByLabel("Problem 1 Live Compare problem ID").fill(payload.problemId);
+  await page.getByLabel("Problem 1 Primary programming language").fill(payload.primaryProgrammingLanguage);
+  await page.getByLabel("Problem 1 Secondary programming languages").fill(payload.secondaryProgrammingLanguages);
+  await page.getByLabel("Problem 1 Task URL").fill(payload.taskUrl);
+  await expect(page.getByLabel("Number of turns for problem 1")).toHaveValue("5");
+  await page.getByLabel("Increase turns for problem 1").click();
+  await expect(page.getByLabel("Number of turns for problem 1")).toHaveValue("6");
+  await page.getByLabel("Problem 1 turn 1 task type").selectOption("Root Cause Analysis");
+  await page.getByLabel("Problem 1 turn 2 task type").selectOption("Code writing");
+  await page.getByLabel("Problem 1 turn 6 task type").selectOption("Testing");
+  await page.getByLabel("Problem 1 task description").fill(payload.summary);
+  await page.getByLabel("Problem 1 Token usage").fill(payload.tokenUsage);
+  await page.getByLabel("Problem 1 blocked on Taiga bug").check();
+  await page.getByLabel("Problem 1 comments").fill("Created during Playwright end-to-end coverage.");
 
-  await page.getByLabel("In 100 words or less describe your task").fill(payload.summary);
-  await page.getByLabel("Token usage").fill(payload.tokenUsage);
-  await page
-    .getByLabel("Were you blocked on this task because of a Taiga error or bug?")
-    .check();
-  await page.getByLabel("Any comments").fill("Created during Playwright end-to-end coverage.");
+  await page.getByRole("button", { name: "Add another problem" }).click();
+  await page.getByLabel("Problem 2 Live Compare problem ID").fill(`${payload.problemId}-B`);
+  await page.getByLabel("Problem 2 Primary programming language").fill(payload.primaryProgrammingLanguage);
+  await page.getByLabel("Problem 2 Secondary programming languages").fill(payload.secondaryProgrammingLanguages);
+  await page.getByLabel("Problem 2 Task URL").fill(`${payload.taskUrl}-b`);
+  await page.getByLabel("Problem 2 task description").fill("Logged a second problem in the same work session.");
+  await page.getByLabel("Problem 2 Token usage").fill("1000");
+  await page.getByLabel("Problem 2 comments").fill("Second problem, same payable work session.");
+  await expect(page.getByLabel("Total hours")).toHaveValue("2.5");
 
   await page.getByRole("button", { name: "Submit timesheet" }).click();
 
   await expect(page.getByText("Timesheet submitted.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "My history" })).toBeVisible();
   await expect(page.getByText(payload.problemId)).toBeVisible();
-  await expect(page.getByText("6 turns")).toBeVisible();
+  await expect(page.getByText(`${payload.problemId}-B`)).toBeVisible();
+  await expect(page.getByText("2 problems")).toBeVisible();
+  await expect(page.getByText("11 turns")).toBeVisible();
   await expect(page.getByText("2.50 hours (override)")).toBeVisible();
-  await expect(page.getByText(`${Number(payload.tokenUsage).toLocaleString()} tokens`)).toBeVisible();
-  await expect(page.getByText(payload.primaryProgrammingLanguage)).toBeVisible();
+  await expect(page.getByText(`${(Number(payload.tokenUsage) + 1000).toLocaleString()} tokens`)).toBeVisible();
   await expect(page.getByText("Taiga blocked")).toBeVisible();
 }
 
@@ -112,22 +120,22 @@ test("debug user can create and edit a timesheet", async ({ page }) => {
   await expect(page.getByRole("link", { name: "Admin portal" })).toHaveCount(0);
   await expect(page.getByLabel("Google Workforce email")).toHaveValue(firstUser.workforceEmail);
 
-  await page.getByLabel(`Edit ${firstUser.problemId}`).click();
+  await page.getByLabel(new RegExp(`Edit ${firstUser.problemId}`)).click();
 
-  await expect(page.getByRole("heading", { name: "Edit timesheet" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Edit work session" })).toBeVisible();
   await expect(page.getByLabel("Google Workforce email")).toHaveValue(firstUser.workforceEmail);
-  await expect(page.getByLabel("Primary programming language")).toHaveValue(firstUser.primaryProgrammingLanguage);
+  await expect(page.getByLabel("Problem 1 Primary programming language")).toHaveValue(firstUser.primaryProgrammingLanguage);
   await expect(page.getByLabel("Session 1 start time")).toHaveValue("2026-06-16T09:00");
   await expect(page.getByLabel("Session 1 end time")).toHaveValue("2026-06-16T10:15");
   await expect(page.getByLabel("Session 2 start time")).toHaveValue("2026-06-16T14:00");
   await expect(page.getByLabel("Session 2 end time")).toHaveValue("2026-06-16T15:00");
   await expect(page.getByLabel("Total hours")).toHaveValue("2.5");
-  await page.getByLabel("Token usage").fill("7777");
-  await page.getByLabel("Any comments").fill("Updated during Playwright end-to-end coverage.");
+  await page.getByLabel("Problem 1 Token usage").fill("7777");
+  await page.getByLabel("Problem 1 comments").fill("Updated during Playwright end-to-end coverage.");
   await page.getByRole("button", { name: "Update timesheet" }).click();
 
   await expect(page.getByText("Timesheet updated.")).toBeVisible();
-  await expect(page.getByText("7,777 tokens")).toBeVisible();
+  await expect(page.getByText("8,777 tokens")).toBeVisible();
 
   await resetDebugData(page);
 });
@@ -151,13 +159,13 @@ test("admin can view all timesheets and download CSV", async ({ page }) => {
   await page.getByRole("link", { name: "Admin portal" }).click();
 
   await expect(page.getByRole("heading", { name: "Admin Portal" })).toBeVisible();
-  await expect(page.getByText("2 submissions across all users")).toBeVisible();
-  await expect(page.getByRole("link", { name: firstUser.problemId })).toBeVisible();
-  await expect(page.getByRole("link", { name: secondUser.problemId })).toBeVisible();
+  await expect(page.getByText("2 work sessions across all users")).toBeVisible();
+  await expect(page.getByRole("link", { exact: true, name: firstUser.problemId })).toBeVisible();
+  await expect(page.getByRole("link", { exact: true, name: secondUser.problemId })).toBeVisible();
   await expect(page.getByText(firstUser.loginEmail)).toBeVisible();
   await expect(page.getByText(secondUser.loginEmail)).toBeVisible();
-  await expect(page.getByText(firstUser.primaryProgrammingLanguage)).toBeVisible();
-  await expect(page.getByText(secondUser.primaryProgrammingLanguage)).toBeVisible();
+  await expect(page.getByText(firstUser.primaryProgrammingLanguage).first()).toBeVisible();
+  await expect(page.getByText(secondUser.primaryProgrammingLanguage).first()).toBeVisible();
   await expect(page.getByText(/Updates every 15s/)).toBeVisible();
 
   const analytics = page.getByTestId("admin-analytics");
@@ -168,14 +176,14 @@ test("admin can view all timesheets and download CSV", async ({ page }) => {
   await expect(analytics.getByRole("heading", { name: "Token Usage Distribution" })).toBeVisible();
   await expect(analytics.getByRole("heading", { name: "Turn Count vs Token Usage" })).toBeVisible();
   await expect(analytics.getByRole("heading", { name: "Reported Hours vs Token Usage" })).toBeVisible();
-  await expect(analytics.getByText("Timesheets analyzed", { exact: true })).toBeVisible();
+  await expect(analytics.getByText("Problems analyzed", { exact: true })).toBeVisible();
   await expect(analytics.getByText("Total turns", { exact: true })).toBeVisible();
-  await expect(analytics.getByText("12", { exact: true }).first()).toBeVisible();
+  await expect(analytics.getByText("22", { exact: true }).first()).toBeVisible();
   await expect(analytics.getByText("Average handling time", { exact: true })).toBeVisible();
   await expect(analytics.getByText("2.50 hrs", { exact: true })).toBeVisible();
   await expect(analytics.getByText("Token rows", { exact: true })).toBeVisible();
   await expect(analytics.getByText("Token outliers removed", { exact: true })).toBeVisible();
-  await expect(analytics.getByText(/Filtered out 0 obvious outlier rows/)).toBeVisible();
+  await expect(analytics.getByText(/Filtered out 0 obvious outlier work sessions/)).toBeVisible();
   await expect(analytics.getByText(/Hours range: 0\.00-24\.00 hrs/)).toBeVisible();
   await expect(analytics.getByText("Debugging").first()).toBeVisible();
 
@@ -198,5 +206,5 @@ test("admin can view all timesheets and download CSV", async ({ page }) => {
   await resetDebugData(page);
   await setDebugUser(page, "gmahajan@labelbox.com", "Gandharv Mahajan");
   await page.goto("/admin");
-  await expect(page.getByText("0 submissions across all users")).toBeVisible();
+  await expect(page.getByText("0 work sessions across all users")).toBeVisible();
 });

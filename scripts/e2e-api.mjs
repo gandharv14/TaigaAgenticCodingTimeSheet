@@ -7,10 +7,6 @@ function dateTimeLocalToIso(value) {
 function payloadFor(suffix, workforceEmail, tokenUsage) {
   return {
     workforceEmail,
-    primaryProgrammingLanguage: suffix === "001" ? "TypeScript" : "Python",
-    secondaryProgrammingLanguages: suffix === "001" ? "SQL" : "JavaScript",
-    liveCompareProblemId: `LC-SCRIPT-${suffix}`,
-    taskUrl: `https://taiga.example/tasks/LC-SCRIPT-${suffix}`,
     workSessions: [
       {
         sessionNumber: 1,
@@ -19,14 +15,22 @@ function payloadFor(suffix, workforceEmail, tokenUsage) {
       }
     ],
     totalHoursOverride: null,
-    summary: `Scripted end-to-end check for ${suffix}.`,
-    comments: "Created by scripts/e2e-api.mjs.",
-    tokenUsage,
-    blockedOnTaigaBug: false,
-    turns: Array.from({ length: 5 }, (_, index) => ({
-      turnNumber: index + 1,
-      taskType: index === 0 ? "Debugging" : "Testing"
-    }))
+    problems: [
+      {
+        primaryProgrammingLanguage: suffix === "001" ? "TypeScript" : "Python",
+        secondaryProgrammingLanguages: suffix === "001" ? "SQL" : "JavaScript",
+        liveCompareProblemId: `LC-SCRIPT-${suffix}`,
+        taskUrl: `https://taiga.example/tasks/LC-SCRIPT-${suffix}`,
+        summary: `Scripted end-to-end check for ${suffix}.`,
+        comments: "Created by scripts/e2e-api.mjs.",
+        tokenUsage,
+        blockedOnTaigaBug: false,
+        turns: Array.from({ length: 5 }, (_, index) => ({
+          turnNumber: index + 1,
+          taskType: index === 0 ? "Debugging" : "Testing"
+        }))
+      }
+    ]
   };
 }
 
@@ -105,10 +109,10 @@ const created = await request("/api/timesheets", {
 });
 assert(created.entry?.id, "Expected created entry id.");
 assert(created.entry.workforceEmail === payload.workforceEmail, "Expected workforce email to round-trip.");
-assert(created.entry.primaryProgrammingLanguage === "TypeScript", "Expected primary language to round-trip.");
-assert(created.entry.secondaryProgrammingLanguages === "SQL", "Expected secondary language to round-trip.");
+assert(created.entry.problems[0].primaryProgrammingLanguage === "TypeScript", "Expected primary language to round-trip.");
+assert(created.entry.problems[0].secondaryProgrammingLanguages === "SQL", "Expected secondary language to round-trip.");
 assert(created.entry.auth0Email === "script-user-one@labelbox.com", "Expected temporary login email to be stored.");
-assert(created.entry.turns.length === 5, "Expected five created turns.");
+assert(created.entry.problems[0].turns.length === 5, "Expected five created turns.");
 assert(created.entry.calculatedHours === 1, "Expected one calculated hour.");
 assert(created.entry.reportedHours === 1, "Expected reported hours to default to calculated hours.");
 
@@ -120,18 +124,31 @@ assert(
 
 const updatedPayload = {
   ...payload,
-  summary: "Updated scripted end-to-end check for the timesheet API.",
   totalHoursOverride: 1.25,
-  tokenUsage: 9876,
-  turns: [...payload.turns, { turnNumber: 6, taskType: "Code review" }]
+  problems: [
+    {
+      ...payload.problems[0],
+      summary: "Updated scripted end-to-end check for the timesheet API.",
+      tokenUsage: 9876,
+      turns: [...payload.problems[0].turns, { turnNumber: 6, taskType: "Code review" }]
+    },
+    {
+      ...payload.problems[0],
+      liveCompareProblemId: "LC-SCRIPT-001-B",
+      taskUrl: "https://taiga.example/tasks/LC-SCRIPT-001-B",
+      summary: "Second problem in the same scripted work session.",
+      tokenUsage: 1111
+    }
+  ]
 };
 
 const updated = await request(`/api/timesheets/${created.entry.id}`, {
   method: "PUT",
   body: JSON.stringify(updatedPayload)
 });
-assert(updated.entry.tokenUsage === 9876, "Expected updated token usage.");
-assert(updated.entry.turns.length === 6, "Expected updated sixth turn.");
+assert(updated.entry.problems[0].tokenUsage === 9876, "Expected updated token usage.");
+assert(updated.entry.problems[0].turns.length === 6, "Expected updated sixth turn.");
+assert(updated.entry.problems.length === 2, "Expected second problem in same work session.");
 assert(updated.entry.reportedHours === 1.25, "Expected updated reported hours override.");
 
 await setDebugUser("script-user-two@labelbox.com", "Script User Two");
@@ -175,7 +192,7 @@ const csv = await csvResponse.text();
 assert(csvResponse.ok, "Expected admin CSV export to succeed.");
 assert(csv.includes("LC-SCRIPT-001"), "Expected CSV to include first entry.");
 assert(csv.includes("LC-SCRIPT-002"), "Expected CSV to include second entry.");
-assert(csv.includes("primary_programming_language"), "Expected CSV to include primary language column.");
+assert(csv.includes("primary_programming_languages"), "Expected CSV to include primary language column.");
 assert(csv.includes("TypeScript"), "Expected CSV to include first primary language.");
 assert(csv.includes("script-user-two@labelbox.com"), "Expected CSV to include login email.");
 

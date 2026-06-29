@@ -4,10 +4,6 @@ import { validateTimesheetInput, validateUserProfileInput } from "@/lib/validati
 
 const validPayload = {
   workforceEmail: "kx9m12@alignerrworkforce.com",
-  primaryProgrammingLanguage: "TypeScript",
-  secondaryProgrammingLanguages: "Python, SQL",
-  liveCompareProblemId: "LC-123",
-  taskUrl: "https://example.com/tasks/LC-123",
   workSessions: [
     {
       sessionNumber: 1,
@@ -16,14 +12,22 @@ const validPayload = {
     }
   ],
   totalHoursOverride: null,
-  summary: "Investigated the task and implemented the requested fix.",
-  comments: null,
-  tokenUsage: 1200,
-  blockedOnTaigaBug: false,
-  turns: Array.from({ length: 5 }, (_, index) => ({
-    turnNumber: index + 1,
-    taskType: "Debugging"
-  }))
+  problems: [
+    {
+      primaryProgrammingLanguage: "TypeScript",
+      secondaryProgrammingLanguages: "Python, SQL",
+      liveCompareProblemId: "LC-123",
+      taskUrl: "https://example.com/tasks/LC-123",
+      summary: "Investigated the task and implemented the requested fix.",
+      comments: null,
+      tokenUsage: 1200,
+      blockedOnTaigaBug: false,
+      turns: Array.from({ length: 5 }, (_, index) => ({
+        turnNumber: index + 1,
+        taskType: "Debugging"
+      }))
+    }
+  ]
 };
 
 describe("timesheet validation", () => {
@@ -34,7 +38,12 @@ describe("timesheet validation", () => {
   it("requires at least five turns", () => {
     const result = validateTimesheetInput({
       ...validPayload,
-      turns: validPayload.turns.slice(0, 4)
+      problems: [
+        {
+          ...validPayload.problems[0],
+          turns: validPayload.problems[0].turns.slice(0, 4)
+        }
+      ]
     });
 
     expect(result.success).toBe(false);
@@ -43,7 +52,12 @@ describe("timesheet validation", () => {
   it("rejects summaries over 100 words", () => {
     const result = validateTimesheetInput({
       ...validPayload,
-      summary: Array.from({ length: 101 }, () => "word").join(" ")
+      problems: [
+        {
+          ...validPayload.problems[0],
+          summary: Array.from({ length: 101 }, () => "word").join(" ")
+        }
+      ]
     });
 
     expect(result.success).toBe(false);
@@ -120,7 +134,12 @@ describe("timesheet validation", () => {
   it("requires token usage", () => {
     const result = validateTimesheetInput({
       ...validPayload,
-      tokenUsage: null
+      problems: [
+        {
+          ...validPayload.problems[0],
+          tokenUsage: null
+        }
+      ]
     });
 
     expect(result.success).toBe(false);
@@ -129,9 +148,11 @@ describe("timesheet validation", () => {
   it("rejects task types outside the allowed set", () => {
     const result = validateTimesheetInput({
       ...validPayload,
-      turns: [
-        { turnNumber: 1, taskType: "Something else" },
-        ...validPayload.turns.slice(1)
+      problems: [
+        {
+          ...validPayload.problems[0],
+          turns: [{ turnNumber: 1, taskType: "Something else" }, ...validPayload.problems[0].turns.slice(1)]
+        }
       ]
     });
 
@@ -150,7 +171,12 @@ describe("timesheet validation", () => {
   it("requires a primary programming language", () => {
     const result = validateTimesheetInput({
       ...validPayload,
-      primaryProgrammingLanguage: ""
+      problems: [
+        {
+          ...validPayload.problems[0],
+          primaryProgrammingLanguage: ""
+        }
+      ]
     });
 
     expect(result.success).toBe(false);
@@ -159,13 +185,34 @@ describe("timesheet validation", () => {
   it("rejects non-sequential turn numbers", () => {
     const result = validateTimesheetInput({
       ...validPayload,
-      turns: validPayload.turns.map((turn, index) => ({
-        ...turn,
-        turnNumber: index === 2 ? 9 : turn.turnNumber
-      }))
+      problems: [
+        {
+          ...validPayload.problems[0],
+          turns: validPayload.problems[0].turns.map((turn, index) => ({
+            ...turn,
+            turnNumber: index === 2 ? 9 : turn.turnNumber
+          }))
+        }
+      ]
     });
 
     expect(result.success).toBe(false);
+  });
+
+  it("accepts multiple problems under one work session", () => {
+    const result = validateTimesheetInput({
+      ...validPayload,
+      problems: [
+        validPayload.problems[0],
+        {
+          ...validPayload.problems[0],
+          liveCompareProblemId: "LC-456",
+          taskUrl: "https://example.com/tasks/LC-456"
+        }
+      ]
+    });
+
+    expect(result.success).toBe(true);
   });
 });
 

@@ -11,10 +11,6 @@ export function timesheetsToCsv(entries: AdminTimesheetRecord[]) {
     "auth0_user_id",
     "auth0_email",
     "workforce_email",
-    "primary_programming_language",
-    "secondary_programming_languages",
-    "live_compare_problem_id",
-    "task_url",
     "start_at",
     "end_at",
     "session_count",
@@ -22,12 +18,17 @@ export function timesheetsToCsv(entries: AdminTimesheetRecord[]) {
     "calculated_hours",
     "total_hours_override",
     "reported_hours",
-    "summary",
+    "problem_count",
+    "problem_ids",
+    "task_urls",
+    "primary_programming_languages",
+    "secondary_programming_languages",
+    "summaries",
     "comments",
-    "token_usage",
-    "blocked_on_taiga_bug",
-    "turn_count",
-    "turn_task_types",
+    "token_usages",
+    "blocked_on_taiga_bug_problem_ids",
+    "total_turn_count",
+    "turn_task_types_by_problem",
     "created_at",
     "updated_at"
   ];
@@ -37,10 +38,6 @@ export function timesheetsToCsv(entries: AdminTimesheetRecord[]) {
     entry.auth0UserId,
     entry.auth0Email,
     entry.workforceEmail,
-    entry.primaryProgrammingLanguage,
-    entry.secondaryProgrammingLanguages,
-    entry.liveCompareProblemId,
-    entry.taskUrl,
     entry.startAt,
     entry.endAt,
     entry.workSessions.length,
@@ -48,12 +45,24 @@ export function timesheetsToCsv(entries: AdminTimesheetRecord[]) {
     entry.calculatedHours,
     entry.totalHoursOverride,
     entry.reportedHours,
-    entry.summary,
-    entry.comments,
-    entry.tokenUsage,
-    entry.blockedOnTaigaBug,
-    entry.turns.length,
-    entry.turns.map((turn) => `${turn.turnNumber}: ${turn.taskType}`).join("; "),
+    entry.problemCount,
+    entry.problems.map((problem) => problem.liveCompareProblemId).join("; "),
+    entry.problems.map((problem) => `${problem.liveCompareProblemId}: ${problem.taskUrl}`).join("; "),
+    entry.problems.map((problem) => `${problem.liveCompareProblemId}: ${problem.primaryProgrammingLanguage}`).join("; "),
+    entry.problems
+      .map((problem) => `${problem.liveCompareProblemId}: ${problem.secondaryProgrammingLanguages ?? ""}`)
+      .join("; "),
+    entry.problems.map((problem) => `${problem.liveCompareProblemId}: ${problem.summary}`).join("; "),
+    entry.problems.map((problem) => `${problem.liveCompareProblemId}: ${problem.comments ?? ""}`).join("; "),
+    entry.problems.map((problem) => `${problem.liveCompareProblemId}: ${problem.tokenUsage ?? ""}`).join("; "),
+    entry.problems
+      .filter((problem) => problem.blockedOnTaigaBug)
+      .map((problem) => problem.liveCompareProblemId)
+      .join("; "),
+    entry.problems.reduce((sum, problem) => sum + problem.turns.length, 0),
+    entry.problems
+      .map((problem) => `${problem.liveCompareProblemId}: ${problem.turns.map((turn) => `${turn.turnNumber}: ${turn.taskType}`).join(" | ")}`)
+      .join("; "),
     entry.createdAt,
     entry.updatedAt
   ]);

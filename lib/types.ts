@@ -11,14 +11,11 @@ export type TimesheetWorkSessionInput = {
   endAt: string;
 };
 
-export type TimesheetInput = {
-  workforceEmail: string;
+export type TimesheetProblemInput = {
   primaryProgrammingLanguage: string;
   secondaryProgrammingLanguages: string | null;
   liveCompareProblemId: string;
   taskUrl: string;
-  workSessions: TimesheetWorkSessionInput[];
-  totalHoursOverride: number | null;
   summary: string;
   comments: string | null;
   tokenUsage: number | null;
@@ -26,13 +23,26 @@ export type TimesheetInput = {
   turns: TimesheetTurnInput[];
 };
 
-export type TimesheetRecord = TimesheetInput & {
+export type TimesheetInput = {
+  workforceEmail: string;
+  workSessions: TimesheetWorkSessionInput[];
+  totalHoursOverride: number | null;
+  problems: TimesheetProblemInput[];
+};
+
+export type TimesheetProblemRecord = TimesheetProblemInput & {
+  id: string;
+};
+
+export type TimesheetRecord = Omit<TimesheetInput, "problems"> & {
   id: string;
   auth0Email: string | null;
   startAt: string;
   endAt: string;
   calculatedHours: number;
   reportedHours: number;
+  problemCount: number;
+  problems: TimesheetProblemRecord[];
   createdAt: string;
   updatedAt: string;
 };
