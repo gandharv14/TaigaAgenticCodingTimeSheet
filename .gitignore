@@ -11,3 +11,4 @@ tsconfig.tsbuildinfo
 .env
 .env*.local
 !.env.example
+APP_SPEC.md

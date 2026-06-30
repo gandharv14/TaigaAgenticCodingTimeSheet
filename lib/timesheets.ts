@@ -5,7 +5,6 @@ import type { TaskType } from "@/lib/task-types";
 import type {
   AdminTimesheetRecord,
   TimesheetInput,
-  TimesheetProblemInput,
   TimesheetProblemRecord,
   TimesheetRecord
 } from "@/lib/types";
@@ -67,17 +66,6 @@ type DebugRecord = TimesheetRecord & {
   clientSubmissionId: string | null;
 };
 
-type CreatedBatchRow = {
-  id: string;
-  auth0_email: string | null;
-  workforce_email: string;
-  start_at: string;
-  end_at: string;
-  total_hours_override?: number | string | null;
-  created_at: string;
-  updated_at: string;
-};
-
 const debugRecords: DebugRecord[] = [];
 const ADMIN_PAGE_SIZE = 1000;
 const USER_SELECT =
@@ -115,22 +103,14 @@ function isMissingMultiProblemSchemaError(error: unknown) {
   const normalizedMessage = typeof message === "string" ? message.toLowerCase() : "";
 
   return (
-    ["42P01", "42703", "PGRST200", "PGRST204", "PGRST205"].includes(normalizedCode) ||
+    ["42P01", "42703", "PGRST200", "PGRST202", "PGRST204", "PGRST205"].includes(normalizedCode) ||
     normalizedMessage.includes("timesheet_work_batches") ||
     normalizedMessage.includes("timesheet_batch_work_sessions") ||
     normalizedMessage.includes("work_batch_id") ||
     normalizedMessage.includes("client_submission_id") ||
+    normalizedMessage.includes("create_timesheet_batch_transaction") ||
     normalizedMessage.includes("schema cache") ||
     normalizedMessage.includes("relationship")
-  );
-}
-
-function isUniqueViolation(error: unknown) {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    typeof (error as { code?: unknown }).code === "string" &&
-    (error as { code: string }).code === "23505"
   );
 }
 
@@ -335,129 +315,36 @@ function toLegacyAdminRecord(row: LegacyEntryRow): AdminTimesheetRecord {
   };
 }
 
-function batchPayload(input: TimesheetInput, auth0UserId: string, auth0Email: string | null) {
+async function createTimesheetBatchTransaction(input: TimesheetInput, auth0UserId: string, auth0Email: string | null) {
   const workSessions = normalizedInputSessions(input);
   const { startAt, endAt } = deriveSessionBounds(workSessions);
-
-  return {
-    auth0_user_id: auth0UserId,
-    auth0_email: auth0Email,
-    client_submission_id: input.clientSubmissionId,
-    workforce_email: input.workforceEmail,
-    start_at: startAt,
-    end_at: endAt,
-    total_hours_override: input.totalHoursOverride
-  };
-}
-
-function entryPayload(
-  problem: TimesheetProblemInput,
-  batchId: string,
-  input: TimesheetInput,
-  auth0UserId: string,
-  auth0Email: string | null
-) {
-  const workSessions = normalizedInputSessions(input);
-  const { startAt, endAt } = deriveSessionBounds(workSessions);
-
-  return {
-    work_batch_id: batchId,
-    auth0_user_id: auth0UserId,
-    auth0_email: auth0Email,
-    workforce_email: input.workforceEmail,
-    primary_programming_language: problem.primaryProgrammingLanguage,
-    secondary_programming_languages: problem.secondaryProgrammingLanguages,
-    live_compare_problem_id: problem.liveCompareProblemId,
-    task_url: problem.taskUrl,
-    start_at: startAt,
-    end_at: endAt,
-    total_hours_override: input.totalHoursOverride,
-    summary: problem.summary,
-    comments: problem.comments,
-    token_usage: problem.tokenUsage,
-    blocked_on_taiga_bug: problem.blockedOnTaigaBug
-  };
-}
-
-async function insertBatchChildren(
-  batchId: string,
-  input: TimesheetInput,
-  auth0UserId: string,
-  auth0Email: string | null
-) {
   const supabase = getSupabaseAdmin();
-  const workSessions = normalizedInputSessions(input).map((session) => ({
-    batch_id: batchId,
-    session_number: session.sessionNumber,
-    start_at: session.startAt,
-    end_at: session.endAt
-  }));
 
-  const { error: workSessionsError } = await supabase.from("timesheet_batch_work_sessions").insert(workSessions);
+  const { data, error } = await supabase.rpc("create_timesheet_batch_transaction", {
+    p_auth0_user_id: auth0UserId,
+    p_auth0_email: auth0Email,
+    p_client_submission_id: input.clientSubmissionId,
+    p_workforce_email: input.workforceEmail,
+    p_start_at: startAt,
+    p_end_at: endAt,
+    p_total_hours_override: input.totalHoursOverride,
+    p_work_sessions: workSessions,
+    p_problems: input.problems
+  });
 
-  if (workSessionsError) {
-    throw workSessionsError;
-  }
-
-  const insertedProblems: TimesheetProblemRecord[] = [];
-
-  for (const problem of input.problems) {
-    const { data: insertedEntry, error: entryError } = await supabase
-      .from("timesheet_entries")
-      .insert(entryPayload(problem, batchId, input, auth0UserId, auth0Email))
-      .select("id")
-      .single();
-
-    if (entryError) {
-      throw entryError;
+  if (error) {
+    if (isMissingMultiProblemSchemaError(error)) {
+      throw new TimesheetSchemaError();
     }
 
-    const turns = problem.turns.map((turn) => ({
-      entry_id: insertedEntry.id,
-      turn_number: turn.turnNumber,
-      task_type: turn.taskType
-    }));
-
-    const { error: turnsError } = await supabase.from("timesheet_turns").insert(turns);
-
-    if (turnsError) {
-      throw turnsError;
-    }
-
-    insertedProblems.push({
-      id: insertedEntry.id,
-      ...problem
-    });
+    throw error;
   }
 
-  return insertedProblems;
-}
+  if (typeof data !== "string" || data.length === 0) {
+    throw new Error("Atomic timesheet creation did not return a batch ID.");
+  }
 
-function createdRecordFromInput(
-  batch: CreatedBatchRow,
-  input: TimesheetInput,
-  auth0Email: string | null,
-  problems: TimesheetProblemRecord[]
-): TimesheetRecord {
-  const workSessions = normalizedInputSessions(input);
-  const calculatedHours = calculateWorkSessionHours(workSessions);
-  const totalHoursOverride = nullableNumber(batch.total_hours_override);
-
-  return {
-    id: batch.id,
-    auth0Email,
-    workforceEmail: batch.workforce_email,
-    workSessions,
-    totalHoursOverride,
-    startAt: batch.start_at,
-    endAt: batch.end_at,
-    calculatedHours,
-    reportedHours: reportedHours(calculatedHours, totalHoursOverride),
-    problemCount: problems.length,
-    problems,
-    createdAt: batch.created_at,
-    updatedAt: batch.updated_at
-  };
+  return data;
 }
 
 function createDebugRecord(input: TimesheetInput, auth0UserId: string, auth0Email: string | null, existing?: DebugRecord) {
@@ -619,34 +506,6 @@ export async function getTimesheetForUser(id: string, auth0UserId: string) {
   return toRecord(data as BatchRow);
 }
 
-async function getTimesheetByClientSubmissionId(clientSubmissionId: string, auth0UserId: string) {
-  if (isDebugAuthBypassEnabled()) {
-    const record = debugRecords.find(
-      (entry) => entry.clientSubmissionId === clientSubmissionId && entry.auth0UserId === auth0UserId
-    );
-
-    if (!record) {
-      throw new Error("Timesheet not found.");
-    }
-
-    return toPublicDebugRecord(record);
-  }
-
-  const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase
-    .from("timesheet_work_batches")
-    .select(USER_SELECT)
-    .eq("auth0_user_id", auth0UserId)
-    .eq("client_submission_id", clientSubmissionId)
-    .single();
-
-  if (error) {
-    throw error;
-  }
-
-  return toRecord(data as BatchRow);
-}
-
 export async function createTimesheet(input: TimesheetInput, auth0UserId: string, auth0Email: string | null) {
   if (isDebugAuthBypassEnabled()) {
     if (input.clientSubmissionId) {
@@ -666,30 +525,6 @@ export async function createTimesheet(input: TimesheetInput, auth0UserId: string
 
   await assertTimesheetWriteSchema();
 
-  const supabase = getSupabaseAdmin();
-
-  const { data: batch, error: batchError } = await supabase
-    .from("timesheet_work_batches")
-    .insert(batchPayload(input, auth0UserId, auth0Email))
-    .select("id, auth0_email, workforce_email, start_at, end_at, total_hours_override, created_at, updated_at")
-    .single();
-
-  if (batchError) {
-    if (input.clientSubmissionId && isUniqueViolation(batchError)) {
-      return getTimesheetByClientSubmissionId(input.clientSubmissionId, auth0UserId);
-    }
-
-    throw batchError;
-  }
-
-  let problems: TimesheetProblemRecord[];
-
-  try {
-    problems = await insertBatchChildren(batch.id, input, auth0UserId, auth0Email);
-  } catch (error) {
-    await supabase.from("timesheet_work_batches").delete().eq("id", batch.id).eq("auth0_user_id", auth0UserId);
-    throw error;
-  }
-
-  return createdRecordFromInput(batch as CreatedBatchRow, input, auth0Email, problems);
+  const batchId = await createTimesheetBatchTransaction(input, auth0UserId, auth0Email);
+  return getTimesheetForUser(batchId, auth0UserId);
 }

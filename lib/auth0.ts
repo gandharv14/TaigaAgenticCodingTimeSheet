@@ -11,6 +11,7 @@ export type CurrentUser = {
 };
 
 const REQUIRED_AUTH0_ENV = ["AUTH0_SECRET", "AUTH0_DOMAIN", "AUTH0_CLIENT_ID", "AUTH0_CLIENT_SECRET"] as const;
+const DEBUG_ADMIN_ENABLED = "AUTH_DEBUG_ALLOW_ADMIN";
 
 export function isAuth0Configured() {
   return REQUIRED_AUTH0_ENV.every((key) => Boolean(process.env[key]));
@@ -19,7 +20,7 @@ export function isAuth0Configured() {
 export const auth0 = isAuth0Configured() ? new Auth0Client() : null;
 
 export function isDebugAuthBypassEnabled() {
-  return process.env.AUTH_DEBUG_BYPASS === "true" && process.env.VERCEL !== "1";
+  return process.env.AUTH_DEBUG_BYPASS === "true" && process.env.NODE_ENV !== "production" && process.env.VERCEL !== "1";
 }
 
 async function readDebugCookie(name: string) {
@@ -34,13 +35,17 @@ async function readDebugCookie(name: string) {
 export async function getDebugUser(): Promise<CurrentUser> {
   const email = (await readDebugCookie("debug_user_email")) ?? process.env.AUTH_DEBUG_EMAIL ?? "debug.alignerr@alignerr.com";
   const name = (await readDebugCookie("debug_user_name")) ?? process.env.AUTH_DEBUG_NAME ?? "Debug User";
+  const normalizedEmail = email.toLowerCase();
+  const configuredDebugEmail = process.env.AUTH_DEBUG_EMAIL?.toLowerCase();
+  const canUseDebugAdmin =
+    process.env[DEBUG_ADMIN_ENABLED] === "true" && configuredDebugEmail === normalizedEmail && isAdminEmail(email);
 
   return {
-    id: `debug|${email.toLowerCase()}`,
+    id: `debug|${normalizedEmail}`,
     email,
     name,
     debug: true,
-    isAdmin: isAdminEmail(email)
+    isAdmin: canUseDebugAdmin
   };
 }
 

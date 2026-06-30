@@ -90,9 +90,9 @@ function emptyProblem(): FormProblem {
   };
 }
 
-function emptyForm(): FormState {
+function emptyForm(clientSubmissionId?: string): FormState {
   return {
-    clientSubmissionId: newClientSubmissionId(),
+    clientSubmissionId: clientSubmissionId ?? newClientSubmissionId(),
     workforceEmail: "",
     workSessions: [{ startAt: "", endAt: "" }],
     totalHours: "",
@@ -284,6 +284,7 @@ export function TimesheetApp({
   const [saving, setSaving] = useState(false);
   const [submitConfirmOpen, setSubmitConfirmOpen] = useState(false);
   const [submitAcknowledged, setSubmitAcknowledged] = useState(false);
+  const [submitMayHaveSucceeded, setSubmitMayHaveSucceeded] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [profileNotice, setProfileNotice] = useState<Notice | null>(null);
   const draftStorageKey = useMemo(
@@ -568,11 +569,16 @@ export function TimesheetApp({
 
   function resetForm() {
     clearSavedDraft();
-    setForm({
-      ...emptyForm(),
+    setForm((current) => ({
+      ...emptyForm(submitMayHaveSucceeded ? current.clientSubmissionId : undefined),
       workforceEmail: profile.workforceEmail
+    }));
+    setNotice({
+      tone: submitMayHaveSucceeded ? "error" : "success",
+      message: submitMayHaveSucceeded
+        ? "Form reset, but this submission ID was kept because the previous submit may have succeeded. Re-enter the same work and submit again to avoid duplicates."
+        : "Form reset."
     });
-    setNotice(null);
     setSubmitConfirmOpen(false);
     setSubmitAcknowledged(false);
   }
@@ -654,6 +660,9 @@ export function TimesheetApp({
     setNotice(null);
     setSubmitConfirmOpen(false);
 
+    let receivedResponse = false;
+    let failureMayHaveSucceeded = false;
+
     try {
       const response = await fetch("/api/timesheets", {
         method: "POST",
@@ -662,9 +671,11 @@ export function TimesheetApp({
         },
         body: JSON.stringify(toPayload(form))
       });
+      receivedResponse = true;
       const data = (await response.json()) as { entry?: TimesheetRecord; error?: string; issues?: string[] };
 
       if (!response.ok || !data.entry) {
+        failureMayHaveSucceeded = response.status >= 500;
         throw new Error(data.issues?.join(" ") || data.error || "Unable to save timesheet.");
       }
 
@@ -676,15 +687,21 @@ export function TimesheetApp({
         tone: "success",
         message: "Timesheet submitted."
       });
+      setSubmitMayHaveSucceeded(false);
       clearSavedDraft();
       setForm({
         ...emptyForm(),
         workforceEmail: profile.workforceEmail
       });
     } catch (error) {
+      failureMayHaveSucceeded ||= !receivedResponse;
+      setSubmitMayHaveSucceeded((current) => current || failureMayHaveSucceeded);
+      const message = error instanceof Error ? error.message : "Unable to save timesheet.";
       setNotice({
         tone: "error",
-        message: error instanceof Error ? error.message : "Unable to save timesheet."
+        message: failureMayHaveSucceeded
+          ? `${message} The request may still have reached the server; retry submit with this same form before starting a new timesheet.`
+          : message
       });
     } finally {
       setSaving(false);

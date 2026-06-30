@@ -50,11 +50,13 @@ npm run build
 
 ## Local Debug E2E
 
-Set `AUTH_DEBUG_BYPASS=true` locally to bypass Auth0 and use an in-memory timesheet store. This bypass is ignored on Vercel.
+Set `AUTH_DEBUG_BYPASS=true` locally to bypass Auth0 and use an in-memory timesheet store. This bypass is disabled in production and ignored on Vercel.
 
 ```bash
 AUTH_DEBUG_BYPASS=true AUTH_DEBUG_EMAIL=debug.alignerr@alignerr.com npm run dev
 ```
+
+To test the admin portal with debug auth, set `AUTH_DEBUG_ALLOW_ADMIN=true` and use an admin allowlist address as `AUTH_DEBUG_EMAIL`. Debug session cookies cannot grant admin access by themselves.
 
 For scripted API coverage against a running debug server:
 
